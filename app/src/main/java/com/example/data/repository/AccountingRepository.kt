@@ -6,6 +6,7 @@ import com.example.data.dao.LedgerTxEntry
 import com.example.data.dao.LedgerWithBalance
 import com.example.data.dao.MonthlyPnlRow
 import com.example.data.model.*
+import com.example.utils.BookBackupSerializer
 import com.example.utils.FiscalYearUtils
 import com.example.utils.GstCalculationService
 import kotlinx.coroutines.flow.Flow
@@ -657,6 +658,58 @@ class AccountingRepository(private val dao: AccountingDao) {
 
     suspend fun getLedgerTransactions(ledgerId: Long): List<LedgerTxEntry> {
         return dao.getLedgerTransactions(ledgerId)
+    }
+
+    // ---------------- Full-fidelity backup / restore ----------------
+
+    /**
+     * Captures the complete set of books, primary keys included.
+     *
+     * Distinct from [exportDataToJson], which is a lossy human-readable summary: it
+     * carries four tables and a subset of their columns, and cannot be restored from
+     * without regenerating voucher numbers and dates. Use this one for anything the
+     * user would call a backup.
+     */
+    suspend fun exportBooksToJson(nowMillis: Long = System.currentTimeMillis()): String {
+        val snapshot = BookBackupSerializer.BookSnapshot(
+            user = dao.getUserDirect(),
+            ledgerGroups = dao.getAllLedgerGroupsList(),
+            ledgers = dao.getAllLedgersList(),
+            inventoryItems = dao.getAllInventoryItemsList(),
+            vouchers = dao.getAllVouchersList(),
+            journalEntries = dao.getAllJournalEntriesList(),
+            voucherItems = dao.getAllVoucherItemsList(),
+            gstTaxDetails = dao.getAllGstTaxDetailsList(),
+            voucherConfigs = dao.getAllVoucherConfigsSync(),
+            reconciliations = dao.getAllReconciliationDiscrepanciesSync()
+        )
+        return BookBackupSerializer.toJson(snapshot, nowMillis)
+    }
+
+    /**
+     * Replaces the current books with the contents of [jsonStr].
+     *
+     * This *replaces*; it does not merge. Importing the previous format appended
+     * instead, so restoring a backup onto a non-empty database silently doubled every
+     * voucher. Returns the number of rows restored, or throws
+     * [BookBackupSerializer.IncompatibleBackupException] if the file cannot be read as
+     * a complete set of books — in which case nothing is touched.
+     */
+    suspend fun restoreBooksFromJson(jsonStr: String): Int {
+        val snapshot = BookBackupSerializer.fromJson(jsonStr)
+        dao.replaceAllBooks(
+            user = snapshot.user,
+            ledgerGroups = snapshot.ledgerGroups,
+            ledgers = snapshot.ledgers,
+            inventoryItems = snapshot.inventoryItems,
+            vouchers = snapshot.vouchers,
+            journalEntries = snapshot.journalEntries,
+            voucherItems = snapshot.voucherItems,
+            gstTaxDetails = snapshot.gstTaxDetails,
+            voucherConfigs = snapshot.voucherConfigs,
+            reconciliations = snapshot.reconciliations
+        )
+        return snapshot.rowCount()
     }
 
     suspend fun exportDataToJson(): String {

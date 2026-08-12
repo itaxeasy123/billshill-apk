@@ -37,6 +37,10 @@ fun SettingsScreen(
     var showGstCertificateModal by remember { mutableStateOf(false) }
     var showExportJsonDialog by remember { mutableStateOf(false) }
     var showImportJsonDialog by remember { mutableStateOf(false) }
+    var showRestoreBackupDialog by remember { mutableStateOf(false) }
+    var deviceBackups by remember { mutableStateOf<List<java.io.File>>(emptyList()) }
+    var backupPendingConfirm by remember { mutableStateOf<java.io.File?>(null) }
+    var exportShareFailed by remember { mutableStateOf(false) }
     var showVoucherTypeManagementModal by remember { mutableStateOf(false) }
     var showReconciliationModal by remember { mutableStateOf(false) }
     var exportedJsonText by remember { mutableStateOf("") }
@@ -947,14 +951,14 @@ fun SettingsScreen(
                     ) {
                         Column {
                             Text(
-                                text = "AUTOMATIC CLOUD BACKUP",
+                                text = "AUTOMATIC ON-DEVICE BACKUP",
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = RoyalPurplePrimary,
                                 letterSpacing = 1.sp
                             )
                             Text(
-                                text = "Periodic backup prompts for offline Room database",
+                                text = "Writes a full backup of your books to this device's storage. Use Sync Books for cloud.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -969,13 +973,13 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
-                    Text("Backup Interval Prompt:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Backup Interval:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        listOf("DAILY" to "Daily Prompt", "WEEKLY" to "Weekly Prompt", "MONTHLY" to "Monthly Prompt").forEach { (freqKey, label) ->
+                        listOf("DAILY" to "Daily", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly").forEach { (freqKey, label) ->
                             FilterChip(
                                 selected = backupFrequency == freqKey,
                                 onClick = { viewModel.setCloudBackupSettings(context, autoCloudBackup, freqKey) },
@@ -1009,8 +1013,28 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Backup Database Now", fontSize = 11.sp)
+                            Text("Back Up Now", fontSize = 11.sp)
                         }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // The retrieval half of the backup feature. Backups have been written
+                    // to this directory all along with no way to ever read one back —
+                    // a backup you cannot restore from is not a backup.
+                    OutlinedButton(
+                        onClick = {
+                            viewModel.loadDeviceBackups { files ->
+                                deviceBackups = files
+                                showRestoreBackupDialog = true
+                            }
+                        },
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Restore From a Backup on This Device", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1153,7 +1177,21 @@ fun SettingsScreen(
             title = { Text("Exported JSON Database Backup", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Copy or save this JSON payload. Contains all vouchers, ledgers, and profile settings.", fontSize = 12.sp)
+                    Text(
+                        "A complete backup of your books — ledgers, groups, vouchers, journal " +
+                            "entries, stock, GST details and voucher numbering. Copy it or save " +
+                            "the file somewhere safe; it can be pasted back under Import JSON.",
+                        fontSize = 12.sp
+                    )
+                    if (exportShareFailed) {
+                        Text(
+                            "Could not open the share sheet — the backup was not shared. " +
+                                "Use Copy JSON instead.",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccountingRed
+                        )
+                    }
                     OutlinedTextField(
                         value = exportedJsonText,
                         onValueChange = {},
@@ -1181,9 +1219,18 @@ fun SettingsScreen(
 
                     Button(
                         onClick = {
-                            val fileName = "Room_Accounting_Backup_${System.currentTimeMillis()}.json"
-                            com.example.utils.CsvExporter.shareCsvFile(context, fileName, exportedJsonText)
-                            showExportJsonDialog = false
+                            val fileName = "BillShield_Books_Backup_${System.currentTimeMillis()}.json"
+                            // Only close the dialog if the share actually started. It used
+                            // to close unconditionally, on top of a success message emitted
+                            // before the file was even written — so a failed share left the
+                            // user with "backed up successfully" and no file.
+                            val shared = com.example.utils.CsvExporter
+                                .shareCsvFile(context, fileName, exportedJsonText)
+                            if (shared) {
+                                showExportJsonDialog = false
+                            } else {
+                                exportShareFailed = true
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                         shape = RoundedCornerShape(12.dp)
@@ -1209,7 +1256,12 @@ fun SettingsScreen(
             title = { Text("Import JSON Database Backup", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text("Paste your exported JSON database backup payload below to restore database state:", fontSize = 12.sp)
+                    Text(
+                        "Paste a backup file's contents below. This REPLACES your current books — " +
+                            "every voucher, ledger and stock item is overwritten by what the backup contains. " +
+                            "If the file cannot be read, nothing is changed.",
+                        fontSize = 12.sp
+                    )
                     OutlinedTextField(
                         value = importJsonText,
                         onValueChange = { importJsonText = it },
@@ -1242,6 +1294,82 @@ fun SettingsScreen(
                 TextButton(onClick = { showImportJsonDialog = false }) {
                     Text("Cancel")
                 }
+            }
+        )
+    }
+
+    if (showRestoreBackupDialog) {
+        AlertDialog(
+            onDismissRequest = { showRestoreBackupDialog = false },
+            title = { Text("Restore From Backup", fontWeight = FontWeight.Bold, fontSize = 18.sp) },
+            text = {
+                if (deviceBackups.isEmpty()) {
+                    Text(
+                        "No backups found on this device yet. Use \"Back Up Now\", or turn on " +
+                            "automatic backup above.",
+                        fontSize = 12.sp
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            "Restoring REPLACES your current books entirely. Pick a backup:",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        deviceBackups.take(10).forEach { file ->
+                            Card(
+                                onClick = { backupPendingConfirm = file },
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Text(file.name, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        "${com.example.service.BookBackupStore.humanReadableSize(file)} · " +
+                                            java.text.SimpleDateFormat("dd MMM yyyy, HH:mm", java.util.Locale.ENGLISH)
+                                                .format(java.util.Date(file.lastModified())),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showRestoreBackupDialog = false }) { Text("Close") }
+            }
+        )
+    }
+
+    // Restoring destroys the current books, so it takes a second, explicit confirmation
+    // naming the file — the same standard the delete-voucher flow already applies.
+    backupPendingConfirm?.let { file ->
+        AlertDialog(
+            onDismissRequest = { backupPendingConfirm = null },
+            title = { Text("Replace your books?", fontWeight = FontWeight.Bold, fontSize = 17.sp) },
+            text = {
+                Text(
+                    "Every voucher, ledger and stock item currently in the app will be replaced " +
+                        "by the contents of ${file.name}. This cannot be undone.",
+                    fontSize = 12.sp
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        viewModel.restoreFromDeviceBackup(file) { success ->
+                            backupPendingConfirm = null
+                            if (success) showRestoreBackupDialog = false
+                        }
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = AccountingRed)
+                ) { Text("Replace My Books") }
+            },
+            dismissButton = {
+                TextButton(onClick = { backupPendingConfirm = null }) { Text("Cancel") }
             }
         )
     }

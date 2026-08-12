@@ -399,6 +399,114 @@ interface AccountingDao {
     @Query("SELECT * FROM ledger_groups ORDER BY name ASC")
     suspend fun getAllLedgerGroupsList(): List<LedgerGroupEntity>
 
+    // ---- Full-fidelity backup / restore ----
+    // The books live across ten tables that reference each other by primary key. A
+    // backup that captures only four of them, and a restore that re-posts vouchers
+    // through createVoucher, cannot reproduce the original set of books: voucher
+    // numbers are reissued, dates restamped to now, GST rates back-derived from
+    // rounded amounts, and every ledger recreated as a Sundry Debtor. These read the
+    // rows as they actually are, and the inserts below put them back with their IDs
+    // intact so every foreign key still resolves.
+
+    @Query("SELECT * FROM voucher_items ORDER BY id ASC")
+    suspend fun getAllVoucherItemsList(): List<VoucherItemEntity>
+
+    @Query("SELECT * FROM gst_tax_details ORDER BY id ASC")
+    suspend fun getAllGstTaxDetailsList(): List<GstTaxDetailEntity>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLedgerGroups(groups: List<LedgerGroupEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertLedgers(ledgers: List<LedgerEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVouchers(vouchers: List<VoucherEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertInventoryItems(items: List<InventoryItemEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertGstTaxDetails(details: List<GstTaxDetailEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertVoucherConfigs(configs: List<VoucherTypeConfigEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertReconciliationDiscrepancies(items: List<ReconciliationDiscrepancyEntity>)
+
+    // Wipe order matters: children before parents, or RESTRICT/CASCADE constraints fire.
+    @Query("DELETE FROM gst_tax_details")
+    suspend fun wipeGstTaxDetails()
+
+    @Query("DELETE FROM voucher_items")
+    suspend fun wipeVoucherItems()
+
+    @Query("DELETE FROM journal_entries")
+    suspend fun wipeJournalEntries()
+
+    @Query("DELETE FROM vouchers")
+    suspend fun wipeVouchers()
+
+    @Query("DELETE FROM ledgers")
+    suspend fun wipeLedgers()
+
+    @Query("DELETE FROM ledger_groups")
+    suspend fun wipeLedgerGroups()
+
+    @Query("DELETE FROM inventory_items")
+    suspend fun wipeInventoryItems()
+
+    @Query("DELETE FROM voucher_type_configs")
+    suspend fun wipeVoucherConfigs()
+
+    /**
+     * Replaces the entire set of books atomically.
+     *
+     * Restore has to be all-or-nothing. Without a transaction, a failure partway through
+     * — a malformed row, a killed process, a full disk — leaves the user with the old
+     * books already deleted and the new ones half-written: no ledgers but all the
+     * vouchers, or journal entries pointing at ledger IDs that no longer exist. Room
+     * rolls the whole thing back if anything in here throws.
+     *
+     * Order is dictated by the foreign keys: children are deleted before their parents,
+     * then parents are inserted before their children.
+     */
+    @Transaction
+    suspend fun replaceAllBooks(
+        user: UserEntity?,
+        ledgerGroups: List<LedgerGroupEntity>,
+        ledgers: List<LedgerEntity>,
+        inventoryItems: List<InventoryItemEntity>,
+        vouchers: List<VoucherEntity>,
+        journalEntries: List<JournalEntryEntity>,
+        voucherItems: List<VoucherItemEntity>,
+        gstTaxDetails: List<GstTaxDetailEntity>,
+        voucherConfigs: List<VoucherTypeConfigEntity>,
+        reconciliations: List<ReconciliationDiscrepancyEntity>
+    ) {
+        wipeGstTaxDetails()
+        wipeVoucherItems()
+        wipeJournalEntries()
+        wipeVouchers()
+        wipeLedgers()
+        wipeLedgerGroups()
+        wipeInventoryItems()
+        wipeVoucherConfigs()
+        clearAllReconciliationDiscrepancies()
+
+        insertLedgerGroups(ledgerGroups)
+        insertLedgers(ledgers)
+        insertInventoryItems(inventoryItems)
+        insertVouchers(vouchers)
+        insertJournalEntries(journalEntries)
+        insertVoucherItems(voucherItems)
+        insertGstTaxDetails(gstTaxDetails)
+        insertVoucherConfigs(voucherConfigs)
+        insertReconciliationDiscrepancies(reconciliations)
+        user?.let { saveUser(it) }
+    }
+
     @Query("SELECT * FROM users LIMIT 1")
     suspend fun getUserDirect(): UserEntity?
 

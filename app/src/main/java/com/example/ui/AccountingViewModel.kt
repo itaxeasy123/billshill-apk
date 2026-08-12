@@ -12,6 +12,7 @@ import com.example.data.preference.UserSettingsDataStore
 import com.example.data.repository.AccountingRepository
 import com.example.data.repository.BalanceTrendPoint
 import com.example.data.sync.FirestoreSyncManager
+import com.example.service.BookBackupStore
 import com.example.service.QuickActionsWidgetProvider
 import com.example.utils.FiscalYearUtils
 import com.example.utils.GstCalculationService
@@ -459,16 +460,67 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     fun setCloudBackupSettings(context: android.content.Context, enabled: Boolean, frequency: String) {
         viewModelScope.launch {
             userSettingsDataStore.saveCloudBackupSettings(enabled, frequency)
-            com.example.service.AutoBackupWorker.schedulePeriodicBackup(context, enabled)
-            _messageEvent.emit("Cloud backup preferences & WorkManager job updated successfully.")
+            // Pass the frequency through -- it was persisted and then ignored, so the
+            // job always ran every 24h no matter which chip the user picked.
+            com.example.service.AutoBackupWorker.schedulePeriodicBackup(context, enabled, frequency)
+            _messageEvent.emit(
+                if (enabled) "Automatic on-device backup scheduled (${frequency.lowercase()})."
+                else "Automatic on-device backup turned off."
+            )
         }
     }
 
+    /**
+     * Writes a real backup file and reports what actually happened.
+     *
+     * This used to stamp a timestamp into DataStore and emit "backed up to Cloud
+     * successfully" without writing a single byte anywhere — the Last Backup line then
+     * showed a time that corresponded to no backup at all, which is the worst possible
+     * failure for this feature: it removes the user's reason to make a real one.
+     *
+     * It is also no longer described as a cloud backup, because it isn't one. The file
+     * is local; Sync Books is the Firestore path.
+     */
     fun triggerManualCloudBackup() {
         viewModelScope.launch {
-            val nowStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH).format(java.util.Date())
-            userSettingsDataStore.updateLastBackupTime(nowStr)
-            _messageEvent.emit("Room Database & Ledger entries backed up to Cloud successfully ($nowStr)!")
+            try {
+                val file = BookBackupStore.writeBackup(getApplication())
+                val nowStr = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.ENGLISH)
+                    .format(java.util.Date())
+                userSettingsDataStore.updateLastBackupTime(nowStr)
+                _messageEvent.emit(
+                    "Backup saved on this device: ${file.name} (${BookBackupStore.humanReadableSize(file)})"
+                )
+            } catch (e: Exception) {
+                // Deliberately does NOT stamp the backup time on failure.
+                _messageEvent.emit("Backup FAILED: ${e.message ?: "could not write backup file"}")
+            }
+        }
+    }
+
+    /** Backups on this device, newest first — the retrieval path H17 flagged as missing. */
+    fun loadDeviceBackups(onLoaded: (List<java.io.File>) -> Unit) {
+        viewModelScope.launch {
+            onLoaded(BookBackupStore.listBackups(getApplication()))
+        }
+    }
+
+    /**
+     * Restores the books from a backup file written on this device.
+     *
+     * Replaces rather than merges, inside a single transaction: either the whole set of
+     * books comes back or nothing changes.
+     */
+    fun restoreFromDeviceBackup(file: java.io.File, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val rows = BookBackupStore.restoreFrom(getApplication(), file)
+                _messageEvent.emit("Books restored from ${file.name} — $rows records.")
+                onResult(true)
+            } catch (e: Exception) {
+                _messageEvent.emit("Restore failed, books unchanged: ${e.message ?: "unreadable backup"}")
+                onResult(false)
+            }
         }
     }
 
@@ -554,23 +606,41 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Produces the full-fidelity backup JSON for the user to copy or share.
+     *
+     * The success message no longer fires here. It used to announce "exported
+     * successfully" the moment the in-memory string was built — before the file was
+     * written and before the share sheet opened — so a failure in either left the user
+     * with a success message and nothing else. The caller reports the real outcome.
+     */
     fun exportDataToJson(onResult: (String) -> Unit) {
         viewModelScope.launch {
-            val json = repository.exportDataToJson()
-            _messageEvent.emit("Database backup exported to JSON successfully!")
-            onResult(json)
+            try {
+                onResult(repository.exportBooksToJson())
+            } catch (e: Exception) {
+                _messageEvent.emit("Could not build backup: ${e.message ?: "unknown error"}")
+            }
         }
     }
 
+    /**
+     * Restores the books from pasted backup JSON.
+     *
+     * Replaces rather than appends. The previous import re-posted every voucher on top
+     * of whatever was already there, so restoring onto a non-empty database doubled the
+     * books — and it reported success while doing it.
+     */
     fun importDataFromJson(jsonStr: String, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
-            val success = repository.importDataFromJson(jsonStr)
-            if (success) {
-                _messageEvent.emit("Backup imported successfully!")
-            } else {
-                _messageEvent.emit("Failed to import JSON backup. Please check format.")
+            try {
+                val rows = repository.restoreBooksFromJson(jsonStr)
+                _messageEvent.emit("Books restored — $rows records replaced the current data.")
+                onResult(true)
+            } catch (e: Exception) {
+                _messageEvent.emit("Restore failed, books unchanged: ${e.message ?: "unreadable backup"}")
+                onResult(false)
             }
-            onResult(success)
         }
     }
 

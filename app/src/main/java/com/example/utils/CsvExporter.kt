@@ -104,14 +104,45 @@ object CsvExporter {
         }
     }
 
-    fun shareCsvFile(context: Context, filename: String, csvContent: String) {
-        try {
+    /**
+     * Picks the MIME type from the filename.
+     *
+     * This function is used to share .xml (Tally/Marg import files) and .json (backups,
+     * telemetry) as well as .csv, and it previously declared every one of them
+     * `text/csv`. Share targets that filter by MIME — which the accounting-import apps
+     * these exports exist for generally do — would not offer themselves as a
+     * destination for a Tally XML file announced as a CSV.
+     */
+    private fun mimeTypeFor(filename: String): String = when {
+        filename.endsWith(".xml", ignoreCase = true) -> "text/xml"
+        filename.endsWith(".json", ignoreCase = true) -> "application/json"
+        filename.endsWith(".pdf", ignoreCase = true) -> "application/pdf"
+        else -> "text/csv"
+    }
+
+    /**
+     * Writes [content] to the export cache and opens a share sheet.
+     *
+     * Returns true only if the file was written and the chooser actually started. The
+     * caller must report failure to the user: this used to swallow every exception into
+     * `printStackTrace()`, so a failed write or a missing chooser produced no file, no
+     * share sheet, and no message — while the calling screen had often already claimed
+     * success.
+     */
+    fun shareCsvFile(context: Context, filename: String, csvContent: String): Boolean {
+        return try {
             val cacheDir = File(context.cacheDir, "csv_exports")
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs()
             }
             val file = File(cacheDir, filename)
-            file.writeText(csvContent)
+            // UTF-8 BOM, CSV only: Excel on Windows otherwise decodes a BOM-less file
+            // with the system code page, turning Devanagari party and business names
+            // into mojibake. It must NOT be added to the JSON and XML files that also
+            // go through here \u2014 a leading BOM makes JSONObject reject a backup outright,
+            // which would break the restore path.
+            val isCsv = filename.endsWith(".csv", ignoreCase = true)
+            file.writeText(if (isCsv) "\uFEFF" + csvContent else csvContent)
 
             val uri: Uri = FileProvider.getUriForFile(
                 context,
@@ -120,14 +151,16 @@ object CsvExporter {
             )
 
             val intent = Intent(Intent.ACTION_SEND).apply {
-                type = "text/csv"
+                type = mimeTypeFor(filename)
                 putExtra(Intent.EXTRA_SUBJECT, "Accounting Export - $filename")
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            context.startActivity(Intent.createChooser(intent, "Export Accounting CSV"))
+            context.startActivity(Intent.createChooser(intent, "Export Accounting Data"))
+            true
         } catch (e: Exception) {
             e.printStackTrace()
+            false
         }
     }
 }

@@ -7,13 +7,9 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.example.data.db.AppDatabase
 import com.example.data.preference.UserSettingsDataStore
-import com.squareup.moshi.Moshi
-import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -27,53 +23,47 @@ class AutoBackupWorker(
     override suspend fun doWork(): Result = withContext(Dispatchers.IO) {
         try {
             val context = applicationContext
-            val db = AppDatabase.getDatabase(context)
-            val dao = db.accountingDao()
 
-            val user = dao.getUserSync()
-            val vouchers = dao.getAllVouchersSync()
-            val ledgers = dao.getAllLedgersSync()
-
-            val moshi = Moshi.Builder().addLast(KotlinJsonAdapterFactory()).build()
-
-            val backupMap = mapOf(
-                "timestamp" to System.currentTimeMillis(),
-                "businessName" to (user?.businessName ?: "My Business"),
-                "voucherCount" to vouchers.size,
-                "ledgerCount" to ledgers.size,
-                "vouchers" to vouchers,
-                "ledgers" to ledgers
-            )
-
-            val jsonAdapter = moshi.adapter(Map::class.java)
-            val jsonString = jsonAdapter.toJson(backupMap)
-
-            val backupDir = File(context.filesDir, "backups").apply { if (!exists()) mkdirs() }
-            val timeStampStr = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date())
-            val backupFile = File(backupDir, "AutoBackup_$timeStampStr.json")
-            val latestBackupFile = File(backupDir, "auto_backup_latest.json")
-
-            backupFile.writeText(jsonString)
-            latestBackupFile.writeText(jsonString)
+            // Writes the same full-fidelity format the manual backup and the restore
+            // path use. Previously this serialised a Moshi map of vouchers+ledgers only,
+            // which nothing in the app could read back -- the one genuinely working
+            // backup in the codebase produced files that could not restore the books.
+            val file = BookBackupStore.writeBackup(context)
 
             val displayTimeStr = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.ENGLISH).format(Date())
             UserSettingsDataStore(context).updateLastBackupTime(displayTimeStr)
 
+            android.util.Log.i(TAG, "Auto-backup written: ${file.name} (${file.length()} bytes)")
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()
-            Result.failure()
+            Result.retry()
         }
     }
 
     companion object {
+        private const val TAG = "AutoBackupWorker"
         const val WORK_NAME = "AutoDatabaseBackupWork"
 
-        fun schedulePeriodicBackup(context: Context, enabled: Boolean) {
+        /**
+         * Maps the Settings frequency chip to a real interval. The chips persisted a
+         * value that never reached this function -- picking Weekly or Monthly changed
+         * the stored preference and nothing else, because the interval was hardcoded
+         * to 24 hours.
+         */
+        private fun intervalHoursFor(frequency: String): Long = when (frequency.uppercase()) {
+            "WEEKLY" -> 7 * 24L
+            "MONTHLY" -> 30 * 24L
+            else -> 24L   // DAILY
+        }
+
+        fun schedulePeriodicBackup(context: Context, enabled: Boolean, frequency: String = "DAILY") {
             try {
                 val workManager = WorkManager.getInstance(context)
                 if (enabled) {
-                    val request = PeriodicWorkRequestBuilder<AutoBackupWorker>(24, TimeUnit.HOURS)
+                    val request = PeriodicWorkRequestBuilder<AutoBackupWorker>(
+                        intervalHoursFor(frequency), TimeUnit.HOURS
+                    )
                         .setConstraints(
                             Constraints.Builder()
                                 .setRequiresStorageNotLow(true)
