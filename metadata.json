@@ -1,0 +1,6 @@
+{
+  "name": "Bill-Shill",
+  "description": "Micro-minimalist offline-first Indian mobile double-entry accounting application with GST calculations, automated ledgers, vouchers, and statutory reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
