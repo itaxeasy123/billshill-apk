@@ -14,6 +14,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.text.SimpleDateFormat
+import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 
@@ -79,8 +80,26 @@ object GstAutomationEngine {
 
             val currentPeriod = SimpleDateFormat("MMyyyy", Locale.US).format(Date())
 
-            // 2. Fetch all vouchers from Room DB
+            // 2. Vouchers for THIS tax period only.
+            //
+            // The period was stamped as the current month while every voucher ever posted
+            // was included, so month 2 filed month 1 all over again and year 3 filed the
+            // entire book — under a heading claiming one month. A GST return covers
+            // exactly one period.
+            val periodBounds = Calendar.getInstance().apply {
+                set(Calendar.DAY_OF_MONTH, 1)
+                set(Calendar.HOUR_OF_DAY, 0); set(Calendar.MINUTE, 0)
+                set(Calendar.SECOND, 0); set(Calendar.MILLISECOND, 0)
+            }
+            val periodStart = periodBounds.timeInMillis
+            val periodEnd = periodBounds.apply { add(Calendar.MONTH, 1) }.timeInMillis - 1
+
             val allVouchers = accountingDao.getAllVouchersSync()
+                .filter { it.date in periodStart..periodEnd }
+                // Oldest first, so the document series in docIssue runs forwards. The DAO
+                // returns newest-first, which made `from` the newest invoice and `to` the
+                // oldest — a declared range running backwards.
+                .sortedBy { it.date }
             val salesVouchers = allVouchers.filter { it.voucherType == VoucherType.SALES || it.voucherType == VoucherType.Sale }
             val purchaseVouchers = allVouchers.filter { it.voucherType == VoucherType.PURCHASE || it.voucherType == VoucherType.Purchase }
 
@@ -121,7 +140,12 @@ object GstAutomationEngine {
                     clientStateCode // Default to Intrastate if unassigned
                 }
 
-                val isInterstate = posStateCode != clientStateCode
+                // Read from the voucher, not recomputed. Deriving it from state codes let
+                // the return disagree with the books: a sale posted interstate (credited
+                // to IGST) whose party has no GSTIN and no state resolved to the seller's
+                // own state, so it was exported as CGST+SGST while the ledgers said IGST.
+                // The posting is the record; the return reports it.
+                val isInterstate = voucher.isInterstate
 
                 // Calculate & Normalize Taxable Value
                 var taxableVal = voucher.totalAmount - voucher.gstAmount
@@ -214,7 +238,7 @@ object GstAutomationEngine {
                     return@forEachIndexed
                 }
                 val hsnQty = lineItems.sumOf { it.quantity }
-                val hsnUqc = itemMaster.unit.uppercase(Locale.US).take(3).ifBlank { "NOS" }
+                val hsnUqc = toUqc(itemMaster.unit)
                 val existingHsn = hsnMap[hsnCode]
                 if (existingHsn != null) {
                     hsnMap[hsnCode] = existingHsn.copy(
@@ -293,7 +317,12 @@ object GstAutomationEngine {
                     clientStateCode
                 }
 
-                val isInterstate = posStateCode != clientStateCode
+                // Read from the voucher, not recomputed. Deriving it from state codes let
+                // the return disagree with the books: a sale posted interstate (credited
+                // to IGST) whose party has no GSTIN and no state resolved to the seller's
+                // own state, so it was exported as CGST+SGST while the ledgers said IGST.
+                // The posting is the record; the return reports it.
+                val isInterstate = voucher.isInterstate
 
                 var taxableVal = voucher.totalAmount - voucher.gstAmount
                 var totalGst = voucher.gstAmount
@@ -401,6 +430,39 @@ object GstAutomationEngine {
             prefs.edit().putString(KEY_LAST_EXPORT_STATUS, failedStatus).apply()
 
             Result.failure(e)
+        }
+    }
+
+    /**
+     * Maps a free-text unit to a GST Unit Quantity Code.
+     *
+     * Taking the first three characters emitted codes the portal rejects — the item
+     * dialog's own hint suggests "Kg", which became "KG" where the valid code is "KGS";
+     * likewise Litre to "LIT" (LTR), Gram to "GRA" (GMS), Piece to "PIE" (PCS). Only a
+     * handful of units happened to survive intact.
+     */
+    private fun toUqc(unit: String): String {
+        val key = unit.trim().lowercase(Locale.US)
+        return when {
+            key.startsWith("pc") || key.startsWith("pie") -> "PCS"
+            key.startsWith("no") -> "NOS"
+            key.startsWith("kg") || key.startsWith("kilo") -> "KGS"
+            key.startsWith("gm") || key.startsWith("gra") -> "GMS"
+            key.startsWith("ton") || key.startsWith("mt") -> "TON"
+            key.startsWith("lt") || key.startsWith("lit") -> "LTR"
+            key.startsWith("ml") -> "MLT"
+            key.startsWith("mtr") || key.startsWith("met") -> "MTR"
+            key.startsWith("cm") -> "CMS"
+            key.startsWith("box") -> "BOX"
+            key.startsWith("bag") -> "BAG"
+            key.startsWith("btl") || key.startsWith("bot") -> "BTL"
+            key.startsWith("doz") -> "DOZ"
+            key.startsWith("set") -> "SET"
+            key.startsWith("pac") || key.startsWith("pkt") -> "PAC"
+            key.startsWith("sqm") -> "SQM"
+            key.startsWith("sqf") -> "SQF"
+            key.startsWith("unt") || key.startsWith("uni") -> "UNT"
+            else -> "OTH"   // the schema's own catch-all, rather than an invented code
         }
     }
 

@@ -41,7 +41,7 @@ object BookBackupStore {
      * because it removes the reason to make another one.
      */
     suspend fun writeBackup(context: Context, nowMillis: Long = System.currentTimeMillis()): File {
-        val repository = AccountingRepository(AppDatabase.getDatabase(context).accountingDao())
+        val repository = AppDatabase.getDatabase(context).let { AccountingRepository(it.accountingDao(), it) }
         val json = repository.exportBooksToJson(nowMillis)
 
         val stamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.ENGLISH).format(Date(nowMillis))
@@ -55,7 +55,7 @@ object BookBackupStore {
 
     /** Restores from a backup file. Returns the number of rows restored. */
     suspend fun restoreFrom(context: Context, file: File): Int {
-        val repository = AccountingRepository(AppDatabase.getDatabase(context).accountingDao())
+        val repository = AppDatabase.getDatabase(context).let { AccountingRepository(it.accountingDao(), it) }
         return repository.restoreBooksFromJson(file.readText())
     }
 

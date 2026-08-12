@@ -26,7 +26,7 @@ import kotlinx.coroutines.launch
 class AccountingViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getDatabase(application)
-    private val repository = AccountingRepository(db.accountingDao())
+    private val repository = AccountingRepository(db.accountingDao(), db)
     private val userSettingsDataStore = UserSettingsDataStore(application)
     private val firestoreSyncManager = FirestoreSyncManager()
 

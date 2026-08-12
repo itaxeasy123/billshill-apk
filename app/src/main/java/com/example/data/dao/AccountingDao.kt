@@ -223,13 +223,41 @@ interface AccountingDao {
         updateVoucherRow(voucher)
     }
 
+    /** Rewrites a manual voucher's amounts against the ledgers it already posts to. */
     @Transaction
-    suspend fun reserveNextVoucherNumber(voucherType: String): VoucherTypeConfigEntity? {
+    suspend fun amendCustomVoucherAtomic(
+        voucher: VoucherEntity,
+        journalEntries: List<JournalEntryEntity>
+    ) {
+        updateVoucherRow(voucher)
+        deleteJournalEntriesForVoucher(voucher.id)
+        insertJournalEntries(journalEntries.map { it.copy(id = 0) })
+    }
+
+    /**
+     * Reserves a voucher number and skips any already in use — all inside one transaction.
+     *
+     * The skip used to run OUTSIDE the transaction, which reintroduced exactly the race
+     * it was added for: with the counter rewound by a restore, A reserves 1001, finds it
+     * taken and advances to 1002, while B — whose row A has not inserted yet — checks
+     * 1002, sees it free, and keeps it. Both post the same number. Done here, the whole
+     * read-scan-advance is serialised by BEGIN IMMEDIATE.
+     */
+    @Transaction
+    suspend fun reserveNextVoucherNumber(voucherType: String): String? {
         val config = getVoucherConfigByType(voucherType) ?: return null
-        if (config.autoIncrement) {
-            insertOrUpdateVoucherConfig(config.copy(nextNumber = config.nextNumber + 1))
+        var seq = config.nextNumber
+        var candidate = config.prefix + String.format(java.util.Locale.ENGLISH, "%04d", seq)
+        var guard = 0
+        while (countVouchersWithNumber(candidate) > 0 && guard < 10_000) {
+            seq += 1
+            candidate = config.prefix + String.format(java.util.Locale.ENGLISH, "%04d", seq)
+            guard++
         }
-        return config
+        if (config.autoIncrement) {
+            insertOrUpdateVoucherConfig(config.copy(nextNumber = seq + 1))
+        }
+        return candidate
     }
 
     // Journal Entry Operations

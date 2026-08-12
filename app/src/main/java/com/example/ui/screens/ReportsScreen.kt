@@ -28,6 +28,8 @@ import com.example.data.dao.LedgerWithBalance
 import com.example.data.model.LedgerCategory
 import com.example.data.model.UserEntity
 import com.example.data.model.VoucherEntity
+import com.example.data.gst.GstClassifier
+import com.example.data.gst.SupplyCategory
 import com.example.data.model.VoucherType
 import com.example.ui.AccountingViewModel
 import com.example.ui.components.AnalyticsSummaryChartCard
@@ -103,6 +105,9 @@ fun ReportsScreen(
     val totalPurchases by viewModel.totalPurchasesState.collectAsState()
     val inventoryItems by viewModel.inventoryState.collectAsState()
     val negativeStockItems by viewModel.negativeStockItemsState.collectAsState()
+    // Party ledgers carry the buyer's GSTIN — the only place it is captured today — and
+    // that is what decides B2B vs B2C.
+    val allLedgersForGst by viewModel.ledgersState.collectAsState()
 
     val filteredTrialBalance = trialBalance.filter { item ->
         val matchesQuery = item.name.contains(ledgerSearchQuery, ignoreCase = true) ||
@@ -639,10 +644,27 @@ fun ReportsScreen(
 
             // TAB 5: GSTR-1 SUMMARY REPORT VIEW (B2B, B2C, HSN Breakdown)
             5 -> {
-                val outboundSales = allVouchers.filter { it.voucherType == VoucherType.SALES }
-                val b2bSales = outboundSales.filter { it.partyName.contains("GSTIN", ignoreCase = true) || user.gstin.isNotBlank() }
-                val b2cLarge = outboundSales.filter { !b2bSales.contains(it) && it.isInterstate && it.totalAmount > 250000.0 }
-                val b2cSmall = outboundSales.filter { !b2bSales.contains(it) && !b2cLarge.contains(it) }
+                // Date-filtered (H10): this read every voucher ever posted while the
+                // heading claimed to cover the selected period, so a "return" for one
+                // month silently contained the whole book.
+                val (gstFrom, gstTo) = dateRangeState.toEpochMillisRange()
+                val outboundSales = allVouchers.filter {
+                    it.voucherType == VoucherType.SALES && it.date in gstFrom..gstTo
+                }
+
+                // One classifier, and it reads the BUYER's GSTIN off their ledger. The old
+                // test was `partyName.contains("GSTIN") || user.gstin.isNotBlank()` — the
+                // second clause is the SELLER's registration, so once the business had a
+                // GSTIN every sale it made was classified B2B and Table 7 was empty (H8).
+                fun buyerGstin(v: VoucherEntity): String? =
+                    allLedgersForGst.firstOrNull { it.name.equals(v.partyName, ignoreCase = true) }?.gstin
+
+                val classified = outboundSales.groupBy {
+                    GstClassifier.classify(buyerGstin(it), it.isInterstate, it.totalAmount)
+                }
+                val b2bSales = classified[SupplyCategory.B2B].orEmpty()
+                val b2cLarge = classified[SupplyCategory.B2CL].orEmpty()
+                val b2cSmall = classified[SupplyCategory.B2CS].orEmpty()
 
                 val totalOutboundVal = outboundSales.sumOf { it.totalAmount }
                 val totalOutboundTax = outboundSales.sumOf { it.gstAmount }
@@ -743,7 +765,7 @@ fun ReportsScreen(
                             MonetaryRow(label = "B2B Supplies Count: ${b2bSales.size} Invoices", amount = b2bSales.sumOf { it.totalAmount }, amountColor = RoyalPurplePrimary)
 
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text("2. B2C Large Invoices (Interstate Supplies > ₹2.5 Lakhs)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            Text("2. B2C Large Invoices (Interstate Supplies > ₹1 Lakh)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                             MonetaryRow(label = "B2C Large Count: ${b2cLarge.size} Invoices", amount = b2cLarge.sumOf { it.totalAmount })
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -1083,10 +1105,15 @@ fun ReportsScreen(
                                             onClick = {
                                                 coroutineScope.launch {
                                                     autoExportStatus = "Running automated GST aggregation & JSON export worker..."
-                                                    com.example.worker.GstAutoExportWorker.triggerImmediateExport(context)
+                                                    // Ran the export TWICE: once via the worker and
+                                                    // again inline, both writing the same file.
                                                     val res = com.example.data.gst.GstAutomationEngine.executeAutomatedGstExport(context)
                                                     autoExportStatus = if (res.isSuccess) {
-                                                        "SUCCESS: Exported ${res.getOrNull()?.name} to Documents folder"
+                                                        // Read back what the engine recorded, which carries
+                                                        // any "N invoices missing from Table 12" warning.
+                                                        // An unconditional SUCCESS here made an incomplete
+                                                        // return look clean.
+                                                        com.example.data.gst.GstAutomationEngine.getLastExportStatus(context)
                                                     } else {
                                                         "FAILED: ${res.exceptionOrNull()?.message}"
                                                     }

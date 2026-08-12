@@ -108,7 +108,10 @@ data class Gstr3bSupDetails(
 )
 
 data class Gstr3bItcItem(
-    @SerializedName("ty") val ty: String = "ALL_OTHER_ITC", // Strict government structural type tag
+    @SerializedName("ty") val // "OTH" per the GSTR-3B schema (IMPG/IMPS/ISRC/ISD/OTH). The old default was
+    // not a value the portal accepts, and fixing only the call site left the rejection
+    // one forgotten argument away.
+    ty: String = "OTH", // Strict government structural type tag
     @SerializedName("iamt") val iamt: Double = 0.0,
     @SerializedName("camt") val camt: Double = 0.0,
     @SerializedName("samt") val samt: Double = 0.0,

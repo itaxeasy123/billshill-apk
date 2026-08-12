@@ -44,13 +44,27 @@ object CsvExporter {
         return sb.toString()
     }
 
-    fun generateGstr1Csv(salesVouchers: List<VoucherEntity>, user: com.example.data.model.UserEntity): String {
+    /**
+     * @param buyerGstins party name (lowercased) to that party's GSTIN, so the classifier
+     *   can tell a registered recipient from a consumer.
+     */
+    fun generateGstr1Csv(
+        salesVouchers: List<VoucherEntity>,
+        user: com.example.data.model.UserEntity,
+        buyerGstins: Map<String, String> = emptyMap()
+    ): String {
         val sb = StringBuilder()
         sb.append("GSTR-1 STATUTORY RETURN SUMMARY REPORT\n")
         sb.append("Business Name,${csv(user.businessName)},GSTIN,${csv(user.gstin)}\n\n")
         sb.append("Voucher No,Invoice Date,Party Name,Supply Category,Taxable Amount (INR),GST Tax Amount (INR),Total Invoice Value (INR),Interstate\n")
         salesVouchers.forEach { v ->
-            val supplyType = if (v.partyName.lowercase().contains("gstin") || user.gstin.isNotBlank()) "B2B" else if (v.isInterstate && v.totalAmount > 250000.0) "B2C Large" else "B2C Small"
+            // Was: `partyName.contains("gstin") || user.gstin.isNotBlank()` — testing the
+            // SELLER's registration, so every sale by a registered business was B2B. Now
+            // the shared classifier, against the buyer's GSTIN carried on the voucher's
+            // party ledger (passed in by the caller).
+            val supplyType = com.example.data.gst.GstClassifier
+                .classify(buyerGstins[v.partyName.lowercase()], v.isInterstate, v.totalAmount)
+                .label
             val taxable = v.totalAmount - v.gstAmount
             sb.append("${csv(v.voucherNo)},${csv(IndianFormatter.formatDate(v.date))},${csv(v.partyName)},$supplyType,$taxable,${v.gstAmount},${v.totalAmount},${v.isInterstate}\n")
         }

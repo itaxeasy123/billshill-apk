@@ -1,5 +1,7 @@
 package com.example.data.repository
 
+import androidx.room.RoomDatabase
+import androidx.room.withTransaction
 import com.example.data.dao.AccountingDao
 import com.example.data.dao.GstSummaryReport
 import com.example.data.dao.LedgerTxEntry
@@ -33,7 +35,26 @@ data class BalanceTrendPoint(
 const val SYSTEM_LEDGER_CASH = "CASH"
 const val SYSTEM_LEDGER_BANK = "BANK"
 
-class AccountingRepository(private val dao: AccountingDao) {
+/**
+ * @param database optional, and only used to wrap multi-step writes in a single
+ *   transaction. Passing it is strongly preferred: without it an amendment commits its
+ *   clear-and-reverse step and then re-posts as loose writes, so a failure in between
+ *   leaves a voucher carrying its new amount with zero journal entries — invisible to
+ *   the Trial Balance while still counted by SUM(totalAmount), which makes the dashboard
+ *   and the P&L disagree permanently with nothing reported. Left nullable so the
+ *   existing `AccountingRepository(dao)` call sites keep compiling.
+ */
+class AccountingRepository(
+    private val dao: AccountingDao,
+    private val database: RoomDatabase? = null
+) {
+
+    /** Runs [block] in one transaction when a database handle was supplied. */
+    private suspend fun <T> inTransaction(block: suspend () -> T): T {
+        val db = database ?: return block()
+        return db.withTransaction { block() }
+    }
+
 
     val userFlow: Flow<UserEntity?> = dao.getUserFlow()
     val allVouchers: Flow<List<VoucherEntity>> = dao.getAllVouchers()
@@ -897,6 +918,40 @@ class AccountingRepository(private val dao: AccountingDao) {
     }
 
     /**
+     * Amends a voucher that was posted against two user-chosen ledgers.
+     *
+     * Keeps those ledgers: it re-reads the existing journal entries and rewrites their
+     * amounts, rather than re-deriving the accounts from the voucher type. Only the
+     * amount, narration, date and tags are editable — changing which accounts a manual
+     * journal hits is a different operation, and silently guessing them is what C3 was.
+     */
+    private suspend fun amendCustomVoucher(
+        existing: VoucherEntity,
+        amount: Double,
+        narration: String,
+        dateMillis: Long,
+        tags: String
+    ) {
+        val entries = dao.getJournalEntriesForVoucher(existing.id)
+        val rewritten = entries.map {
+            it.copy(
+                debitAmount = if (it.debitAmount > 0) amount else 0.0,
+                creditAmount = if (it.creditAmount > 0) amount else 0.0
+            )
+        }
+        dao.amendCustomVoucherAtomic(
+            voucher = existing.copy(
+                totalAmount = amount,
+                narration = narration.ifBlank { existing.narration },
+                date = dateMillis,
+                tags = tags,
+                isSynced = false
+            ),
+            journalEntries = rewritten
+        )
+    }
+
+    /**
      * Amends a posted voucher in place, preserving its identity.
      *
      * Was delete-and-recreate with seven parameters, which meant every edit issued a new
@@ -919,11 +974,33 @@ class AccountingRepository(private val dao: AccountingDao) {
         narration: String,
         dateMillis: Long,
         tags: String,
+        // null means "unchanged", NOT "remove". Both edit dialogs omit these, and
+        // treating omission as removal meant a narration edit reversed the stock movement
+        // and never re-applied it: a sale of 10 units silently un-sold them, inflating
+        // closing stock and net profit, and dropped the invoice out of GSTR-1 Table 12.
         selectedItemId: Long? = null,
-        itemQuantity: Double = 1.0
+        itemQuantity: Double? = null
     ) {
         val existing = dao.getVoucherById(voucherId) ?: return
+
+        // A voucher created through the Manual/Custom form posts to two ledgers the user
+        // named, and records them as "Dr X / Cr Y" in partyName. Re-posting it through
+        // createVoucher's per-type branches would move it to hardcoded accounts and
+        // manufacture a Sundry Debtor called "Dr X / Cr Y" — silently undoing C3. Those
+        // vouchers are amended by re-running the custom posting instead.
+        if (existing.partyName.startsWith("Dr ") && existing.partyName.contains(" / Cr ")) {
+            amendCustomVoucher(existing, amount, narration, dateMillis, tags)
+            return
+        }
+
         val oldItems = dao.getVoucherItemsForVoucher(voucherId)
+
+        // Carry the existing line item forward when the caller did not supply one.
+        val effectiveItemId = selectedItemId ?: oldItems.firstOrNull()?.itemId
+        val effectiveQty = itemQuantity
+            ?: oldItems.firstOrNull()?.quantity
+            ?: 1.0
+        val effectiveRate = oldItems.firstOrNull()?.rate ?: 0.0
 
         val breakdown = GstCalculationService.calculateGstBreakdown(amount, gstRate, isInterstate)
         val partyLedger = getOrCreatePartyLedger(partyName, voucherType)
@@ -932,6 +1009,7 @@ class AccountingRepository(private val dao: AccountingDao) {
         // the type, and reversing with the new one would move stock the wrong way.
         val reversals = oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
 
+        inTransaction {
         dao.clearVoucherChildrenAtomic(
             voucher = existing.copy(
                 voucherType = voucherType,
@@ -974,11 +1052,14 @@ class AccountingRepository(private val dao: AccountingDao) {
             isInterstate = isInterstate,
             narration = narration,
             breakdown = breakdown,
-            selectedItemId = selectedItemId,
-            itemQuantity = itemQuantity,
-            itemRate = 0.0,
+            selectedItemId = effectiveItemId,
+            itemQuantity = effectiveQty,
+            // Preserve the original per-unit rate instead of forcing
+            // taxableValue / quantity, which also produced Infinity at qty 0.
+            itemRate = effectiveRate,
             inventoryEnabled = dao.getUserSync()?.enableInventory ?: true
         )
+        }
 
         dao.insertSyncLog(
             SyncLogEntity(
@@ -1032,9 +1113,6 @@ class AccountingRepository(private val dao: AccountingDao) {
      */
     val negativeStockItemsFlow: Flow<List<InventoryItemEntity>> = dao.getNegativeStockItemsFlow()
 
-    /** Quantity that would remain if [itemId] moved by [delta]; null when unknown. */
-    suspend fun projectedStockAfter(itemId: Long, delta: Double): Double? =
-        dao.getInventoryItemById(itemId)?.let { it.stockQty + delta }
 
     suspend fun getLedgerTransactions(ledgerId: Long): List<LedgerTxEntry> {
         return dao.getLedgerTransactions(ledgerId)
@@ -1276,24 +1354,9 @@ class AccountingRepository(private val dao: AccountingDao) {
      * The skip loop matters because a restore can rewind the counter below numbers that
      * already exist in the books; without it those numbers would silently duplicate.
      */
-    suspend fun generateNextVoucherNo(voucherType: VoucherType): String {
-        val config = dao.reserveNextVoucherNumber(voucherType.name)
-            ?: return seedMissingConfigAndReserve(voucherType)
-
-        var seq = config.nextNumber
-        var candidate = "${config.prefix}${String.format(Locale.ENGLISH, "%04d", seq)}"
-        // Bounded so a corrupt counter cannot spin forever.
-        var guard = 0
-        while (dao.countVouchersWithNumber(candidate) > 0 && guard < 10_000) {
-            seq += 1
-            candidate = "${config.prefix}${String.format(Locale.ENGLISH, "%04d", seq)}"
-            guard++
-        }
-        if (seq != config.nextNumber && config.autoIncrement) {
-            dao.insertOrUpdateVoucherConfig(config.copy(nextNumber = seq + 1))
-        }
-        return candidate
-    }
+    /** Issues the next voucher number. Reservation and duplicate-skip are atomic (H7). */
+    suspend fun generateNextVoucherNo(voucherType: VoucherType): String =
+        dao.reserveNextVoucherNumber(voucherType.name) ?: seedMissingConfigAndReserve(voucherType)
 
     /**
      * Recreates a missing numbering config, then reserves from it.
