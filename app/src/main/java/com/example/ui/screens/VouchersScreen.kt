@@ -100,17 +100,13 @@ fun VouchersScreen(
 
     var showContactsDialog by remember { mutableStateOf(false) }
     var showFavoritesDialog by remember { mutableStateOf(false) }
-    var favoriteCustomers by remember { mutableStateOf(listOf("Anand Traders", "Sharma Electronics", "Gupta Wholesale Store", "Rahul Retailers", "Vijay Electricals")) }
-    val sampleContacts = remember {
-        listOf(
-            "Anand Traders (+91 9876543210)",
-            "Sharma Electronics (+91 9812345678)",
-            "Gupta Wholesale (+91 9765432109)",
-            "Rahul Retail Store (+91 9654321098)",
-            "Priya General Store (+91 9543210987)",
-            "Vijay Electricals (+91 9432109876)"
-        )
-    }
+    // Starts empty on purpose. This list used to ship pre-populated with five invented
+    // customers (Anand Traders, Sharma Electronics, ...) presented as the user's own
+    // saved favourites. The companion `sampleContacts` list was worse: six invented
+    // people WITH phone numbers, shown under "Select Customer from Contacts" as though
+    // they had been read off the device. The app holds no READ_CONTACTS permission and
+    // has no ContentResolver query, so nothing there was ever real.
+    var favoriteCustomers by remember { mutableStateOf(emptyList<String>()) }
 
     val inventoryItems by viewModel.inventoryState.collectAsState()
     var selectedItem by remember { mutableStateOf<InventoryItemEntity?>(null) }
@@ -1103,9 +1099,25 @@ fun VouchersScreen(
 
     // Share UPI QR Code Modal Dialog
     qrVoucher?.let { voucher ->
-        val vpa = if (user.phoneNumber.isNotBlank()) "${user.phoneNumber}@upi" else "pay.business@upi"
-        val upiString = "upi://pay?pa=$vpa&pn=${user.businessName.ifBlank { "Business Store" }.replace(" ", "%20")}&am=%.2f&cu=INR&tn=Invoice%20${voucher.voucherNo.replace(" ", "%20")}".format(voucher.totalAmount)
-        
+        // The payee VPA is derived from the user's own registered mobile number. It used
+        // to fall back to the invented VPA "pay.business@upi" with payee "Business Store",
+        // which produced a genuine, scannable payment instruction addressed to an account
+        // the user does not own -- the customer's money would have gone nowhere, or to a
+        // stranger. With no mobile number on file there is no VPA, so the QR and the
+        // share-link action are withheld rather than fabricated.
+        // Amount is formatted on its own (Locale.US so the separator stays a dot). Calling
+        // .format() on the whole URL crashed with UnknownFormatConversionException, because
+        // the URL's literal "%20" escapes parse as format specifiers.
+        val upiPayment: Pair<String, String>? = user.phoneNumber.trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { phone ->
+                val payeeVpa = "$phone@upi"
+                val amountText = String.format(java.util.Locale.US, "%.2f", voucher.totalAmount)
+                val url = "upi://pay?pa=$payeeVpa&pn=${user.businessName.replace(" ", "%20")}" +
+                    "&am=$amountText&cu=INR&tn=Invoice%20${voucher.voucherNo.replace(" ", "%20")}"
+                payeeVpa to url
+            }
+
         AlertDialog(
             onDismissRequest = { qrVoucher = null },
             title = {
@@ -1117,29 +1129,46 @@ fun VouchersScreen(
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    com.example.utils.UpiQrCodeView(
-                        vpa = vpa,
-                        payeeName = user.businessName.ifBlank { "Business Store" },
-                        amount = voucher.totalAmount,
-                        invoiceNo = voucher.voucherNo,
-                        size = 200.dp
-                    )
-                    Text("Customer: ${voucher.partyName}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
-                    Button(
-                        onClick = {
-                            val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
-                                type = "text/plain"
-                                putExtra(android.content.Intent.EXTRA_SUBJECT, "UPI Payment for Invoice #${voucher.voucherNo}")
-                                putExtra(android.content.Intent.EXTRA_TEXT, "Pay ₹%.2f to ${user.businessName} via UPI link: $upiString".format(voucher.totalAmount))
-                            }
-                            context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Payment Link via"))
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Share Payment Link")
+                    if (upiPayment == null) {
+                        Text(
+                            text = "Add a UPI ID in Settings to share a payment link.",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Text(
+                            text = "Your profile has no mobile number, so there is no UPI ID to collect this payment into. Set it under Settings › Update Profile.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        val (payeeVpa, upiUrl) = upiPayment
+                        com.example.utils.UpiQrCodeView(
+                            vpa = payeeVpa,
+                            payeeName = user.businessName,
+                            amount = voucher.totalAmount,
+                            invoiceNo = voucher.voucherNo,
+                            size = 200.dp
+                        )
+                        Text("Customer: ${voucher.partyName}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Button(
+                            onClick = {
+                                val payeeSuffix = if (user.businessName.isNotBlank()) " to ${user.businessName}" else ""
+                                val payAmountText = String.format(java.util.Locale.US, "%.2f", voucher.totalAmount)
+                                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                                    type = "text/plain"
+                                    putExtra(android.content.Intent.EXTRA_SUBJECT, "UPI Payment for Invoice #${voucher.voucherNo}")
+                                    putExtra(android.content.Intent.EXTRA_TEXT, "Pay ₹$payAmountText$payeeSuffix via UPI link: $upiUrl")
+                                }
+                                context.startActivity(android.content.Intent.createChooser(shareIntent, "Share Payment Link via"))
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Share Payment Link")
+                        }
                     }
                 }
             },
@@ -1244,31 +1273,22 @@ fun VouchersScreen(
             onDismissRequest = { showContactsDialog = false },
             title = { Text("Select Customer from Contacts", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    sampleContacts.forEach { contactStr ->
-                        val cleanName = contactStr.substringBefore(" (")
-                        Card(
-                            onClick = {
-                                partyName = cleanName
-                                showContactsDialog = false
-                            },
-                            shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(Icons.Default.Contacts, contentDescription = null, tint = RoyalPurplePrimary)
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column {
-                                    Text(cleanName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                    Text(contactStr.substringAfter("(").removeSuffix(")"), fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                }
-                            }
-                        }
-                    }
+                // Honest empty state. This dialog used to list six invented people with
+                // invented phone numbers as if they had been read from the device address
+                // book. The app requests no contacts permission and performs no
+                // ContentResolver lookup, so there is nothing real to show here.
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Icon(Icons.Default.Contacts, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text("No contacts available", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    Text(
+                        text = "Importing customers from your phone's address book isn't supported yet. Type the party name above, or pick one of your existing ledgers from the dropdown.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
             },
             confirmButton = {

@@ -50,35 +50,26 @@ fun QrCodeScannerDialog(
     onInvoiceScanned: (ScannedInvoiceData) -> Unit,
     realLedgers: List<LedgerEntity> = emptyList()
 ) {
-    var hasPermission by remember { mutableStateOf(true) }
-    var flashEnabled by remember { mutableStateOf(false) }
-    
-    // Real OCR scanned input state
-    var customPartyName by remember { mutableStateOf(realLedgers.firstOrNull()?.name ?: "Cash Account") }
-    var customAmountText by remember { mutableStateOf("15000") }
-    var customGstRateText by remember { mutableStateOf("18") }
+    // Every field starts empty. They used to open pre-filled with an invented invoice --
+    // party "Cash Account", amount 15000, rate 18%, narration "Scanned Invoice OCR Entry"
+    // -- so a single tap on Save posted a ₹15,000 purchase the user never made. There is
+    // no camera binding and no OCR in this dialog; nothing here was ever scanned.
+    var customPartyName by remember { mutableStateOf("") }
+    var customAmountText by remember { mutableStateOf("") }
+    var customGstRateText by remember { mutableStateOf("") }
     var customVoucherType by remember { mutableStateOf(VoucherType.PURCHASE) }
-    var customNarration by remember { mutableStateOf("Scanned Invoice OCR Entry") }
     var isInterstate by remember { mutableStateOf(false) }
 
-    val infiniteTransition = rememberInfiniteTransition(label = "laser")
-    val laserYPosition by infiniteTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1800, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "laserPos"
-    )
+    // Only real ledgers from the database. The fallback list here previously invented four
+    // party accounts ("Sharma Electronics", "Apex Wholesale", ...) under a heading that
+    // called them REAL LEDGERS.
+    val realParties = remember(realLedgers) { realLedgers.map { it.name } }
 
-    val realParties = remember(realLedgers) {
-        if (realLedgers.isNotEmpty()) {
-            realLedgers.map { it.name }
-        } else {
-            listOf("Sharma Electronics", "Apex Wholesale", "Cash Account", "Sundry Debtors")
-        }
-    }
+    val parsedAmount = customAmountText.trim().toDoubleOrNull()
+    val parsedGstRate = customGstRateText.trim().toDoubleOrNull()
+    val canSubmit = customPartyName.isNotBlank() &&
+        parsedAmount != null && parsedAmount > 0.0 &&
+        parsedGstRate != null && parsedGstRate >= 0.0
 
     Dialog(
         onDismissRequest = onDismissRequest,
@@ -124,24 +115,15 @@ fun QrCodeScannerDialog(
                             }
 
                             Text(
-                                text = "Scan Digital Invoice / QR",
+                                text = "Enter Invoice Details",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
 
-                            IconButton(
-                                onClick = { flashEnabled = !flashEnabled },
-                                modifier = Modifier
-                                    .clip(CircleShape)
-                                    .background(if (flashEnabled) RoyalPurplePrimary else Color.White.copy(alpha = 0.2f))
-                            ) {
-                                Icon(
-                                    imageVector = if (flashEnabled) Icons.Default.FlashOn else Icons.Default.FlashOff,
-                                    contentDescription = "Flash Toggle",
-                                    tint = Color.White
-                                )
-                            }
+                            // The flash toggle was removed along with the laser animation: both
+                            // simulated a live camera this dialog does not have.
+                            Spacer(modifier = Modifier.size(48.dp))
                         }
 
                         // Scanning Frame Center
@@ -153,16 +135,9 @@ fun QrCodeScannerDialog(
                                 .background(Color.Black.copy(alpha = 0.4f)),
                             contentAlignment = Alignment.Center
                         ) {
-                            // Laser Line Canvas Animation
-                            Canvas(modifier = Modifier.fillMaxSize()) {
-                                val y = size.height * laserYPosition
-                                drawLine(
-                                    color = Color(0xFF00FF88),
-                                    start = Offset(16.dp.toPx(), y),
-                                    end = Offset(size.width - 16.dp.toPx(), y),
-                                    strokeWidth = 3.dp.toPx()
-                                )
-                            }
+                            // The animated green "laser" sweep that used to be drawn here was
+                            // removed: it simulated an active camera scan, and no camera is
+                            // bound to this dialog.
 
                             // Corner Markers
                             Column(
@@ -186,11 +161,12 @@ fun QrCodeScannerDialog(
                             }
 
                             Text(
-                                text = "Align QR Code inside frame",
+                                text = "Camera scanning isn't available yet.\nEnter the invoice details below.",
                                 fontSize = 12.sp,
                                 color = Color.White.copy(alpha = 0.8f),
                                 fontWeight = FontWeight.Medium,
-                                modifier = Modifier.align(Alignment.Center)
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.align(Alignment.Center).padding(horizontal = 24.dp)
                             )
                         }
 
@@ -204,8 +180,11 @@ fun QrCodeScannerDialog(
                                 .padding(bottom = 12.dp)
                         ) {
                             Column(modifier = Modifier.padding(14.dp)) {
+                                // Heading previously read "SCANNED INVOICE DATA (REAL LEDGERS)"
+                                // above a hardcoded list of invented parties. Nothing is scanned
+                                // and nothing is pre-filled; this is a manual entry form.
                                 Text(
-                                    text = "SCANNED INVOICE DATA (REAL LEDGERS)",
+                                    text = "INVOICE DETAILS",
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF00FF88)
@@ -215,24 +194,32 @@ fun QrCodeScannerDialog(
                                 // Party Selection Chips from Real DB Ledgers
                                 Text("Select Party Account:", fontSize = 11.sp, color = Color.LightGray)
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .horizontalScroll(rememberScrollState()),
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    realParties.forEach { party ->
-                                        FilterChip(
-                                            selected = customPartyName == party,
-                                            onClick = { customPartyName = party },
-                                            label = { Text(party, fontSize = 11.sp) },
-                                            colors = FilterChipDefaults.filterChipColors(
-                                                selectedContainerColor = Color(0xFF00FF88),
-                                                selectedLabelColor = Color.Black,
-                                                containerColor = Color.White.copy(alpha = 0.1f),
-                                                labelColor = Color.White
+                                if (realParties.isEmpty()) {
+                                    Text(
+                                        text = "No ledgers yet — create one first to record this invoice against a party.",
+                                        fontSize = 11.sp,
+                                        color = Color.LightGray.copy(alpha = 0.7f)
+                                    )
+                                } else {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .horizontalScroll(rememberScrollState()),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        realParties.forEach { party ->
+                                            FilterChip(
+                                                selected = customPartyName == party,
+                                                onClick = { customPartyName = party },
+                                                label = { Text(party, fontSize = 11.sp) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = Color(0xFF00FF88),
+                                                    selectedLabelColor = Color.Black,
+                                                    containerColor = Color.White.copy(alpha = 0.1f),
+                                                    labelColor = Color.White
+                                                )
                                             )
-                                        )
+                                        }
                                     }
                                 }
 
@@ -246,6 +233,7 @@ fun QrCodeScannerDialog(
                                         value = customAmountText,
                                         onValueChange = { customAmountText = it },
                                         label = { Text("Invoice Amount (₹)", fontSize = 10.sp, color = Color.LightGray) },
+                                        placeholder = { Text("0.00", fontSize = 11.sp, color = Color.Gray) },
                                         singleLine = true,
                                         colors = OutlinedTextFieldDefaults.colors(
                                             focusedBorderColor = Color(0xFF00FF88),
@@ -256,30 +244,60 @@ fun QrCodeScannerDialog(
                                         modifier = Modifier.weight(1f)
                                     )
 
-                                    Button(
-                                        onClick = {
-                                            val amt = customAmountText.toDoubleOrNull() ?: 1000.0
-                                            val gst = customGstRateText.toDoubleOrNull() ?: 18.0
+                                    OutlinedTextField(
+                                        value = customGstRateText,
+                                        onValueChange = { customGstRateText = it },
+                                        label = { Text("GST Rate (%)", fontSize = 10.sp, color = Color.LightGray) },
+                                        placeholder = { Text("e.g. 18", fontSize = 11.sp, color = Color.Gray) },
+                                        singleLine = true,
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedBorderColor = Color(0xFF00FF88),
+                                            unfocusedBorderColor = Color.Gray,
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White
+                                        ),
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(10.dp))
+
+                                // Submission is blocked until the party, amount and rate are all
+                                // actually entered. It used to substitute ₹1,000 and 18% for
+                                // anything the user left unparseable.
+                                Button(
+                                    onClick = {
+                                        val amt = parsedAmount
+                                        val gst = parsedGstRate
+                                        if (amt != null && gst != null) {
                                             onInvoiceScanned(
                                                 ScannedInvoiceData(
                                                     partyName = customPartyName,
                                                     amount = amt,
                                                     gstRate = gst,
                                                     isInterstate = isInterstate,
-                                                    narration = "Scanned OCR Invoice for $customPartyName • ₹$amt",
+                                                    narration = "",
                                                     voucherType = customVoucherType
                                                 )
                                             )
                                             onDismissRequest()
-                                        },
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88)),
-                                        modifier = Modifier
-                                            .padding(top = 8.dp)
-                                            .weight(1f)
-                                    ) {
-                                        Text("Save Scanned Voucher", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
-                                    }
+                                        }
+                                    },
+                                    enabled = canSubmit,
+                                    shape = RoundedCornerShape(12.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00FF88)),
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Save Voucher", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                }
+
+                                if (!canSubmit) {
+                                    Spacer(modifier = Modifier.height(6.dp))
+                                    Text(
+                                        text = "Enter a party, an amount and a GST rate to save.",
+                                        fontSize = 10.sp,
+                                        color = Color.LightGray.copy(alpha = 0.7f)
+                                    )
                                 }
                             }
                         }

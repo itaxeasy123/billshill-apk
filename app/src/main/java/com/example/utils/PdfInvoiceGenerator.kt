@@ -62,10 +62,27 @@ object PdfInvoiceGenerator {
         canvas.drawCircle(50f, y + 32f, 20f, Paint().apply { color = Color.rgb(103, 58, 183) })
         canvas.drawText(user.businessName.take(1).uppercase(), 45f, y + 38f, Paint().apply { color = Color.WHITE; textSize = 16f; isFakeBoldText = true; isAntiAlias = true })
 
-        canvas.drawText(user.businessName.ifBlank { "Apex Enterprises India" }, 80f, y + 25f, headerPaint)
-        val ownerName = "Proprietor: ${user.firstName} ${user.middleName} ${user.surname}".replace("\\s+".toRegex(), " ").trim()
-        canvas.drawText("$ownerName | GSTIN: ${user.gstin}", 80f, y + 42f, paint.apply { textSize = 9.5f })
-        canvas.drawText("${user.address}, ${user.city}, ${user.state} | Ph: ${user.phoneNumber}", 80f, y + 56f, paint.apply { textSize = 9.5f })
+        // Letterhead. The business name used to fall back to the invented firm
+        // "Apex Enterprises India" whenever the profile was blank, and the identity and
+        // address lines printed their separators around empty fields. Blank fields are
+        // now dropped so the letterhead shows only what the user actually entered.
+        canvas.drawText(user.businessName.ifBlank { "—" }, 80f, y + 25f, headerPaint)
+        val ownerName = "${user.firstName} ${user.middleName} ${user.surname}".replace("\\s+".toRegex(), " ").trim()
+        val identityLine = listOfNotNull(
+            ownerName.takeIf { it.isNotBlank() }?.let { "Proprietor: $it" },
+            user.gstin.takeIf { it.isNotBlank() }?.let { "GSTIN: $it" }
+        ).joinToString(" | ")
+        if (identityLine.isNotBlank()) {
+            canvas.drawText(identityLine, 80f, y + 42f, paint.apply { textSize = 9.5f })
+        }
+        val addressLine = listOfNotNull(
+            listOf(user.address, user.city, user.state).filter { it.isNotBlank() }
+                .joinToString(", ").takeIf { it.isNotBlank() },
+            user.phoneNumber.takeIf { it.isNotBlank() }?.let { "Ph: $it" }
+        ).joinToString(" | ")
+        if (addressLine.isNotBlank()) {
+            canvas.drawText(addressLine, 80f, y + 56f, paint.apply { textSize = 9.5f })
+        }
 
         y += 80f
 
@@ -125,8 +142,10 @@ object PdfInvoiceGenerator {
 
         y += 50f
 
-        // Footer Signatory
-        canvas.drawText("For ${user.businessName}", 400f, y, boldPaint)
+        // Footer Signatory (omitted rather than printing a dangling "For ")
+        if (user.businessName.isNotBlank()) {
+            canvas.drawText("For ${user.businessName}", 400f, y, boldPaint)
+        }
         y += 40f
         canvas.drawLine(380f, y, 550f, y, Paint().apply { color = Color.GRAY; strokeWidth = 1f })
         canvas.drawText("Authorized Signatory / Accountant", 400f, y + 14f, paint.apply { textSize = 9f })
@@ -148,7 +167,11 @@ object PdfInvoiceGenerator {
                 type = "application/pdf"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, "Ledger Statement - $ledgerName")
-                putExtra(Intent.EXTRA_TEXT, "Statement of Account for $ledgerName from ${user.businessName}")
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    "Statement of Account for $ledgerName" +
+                        if (user.businessName.isNotBlank()) " from ${user.businessName}" else ""
+                )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
@@ -202,11 +225,27 @@ object PdfInvoiceGenerator {
         val whiteLogoPaint = Paint().apply { color = Color.WHITE; textSize = 16f; isFakeBoldText = true; isAntiAlias = true }
         canvas.drawText(user.businessName.take(1).uppercase(), 45f, y + 38f, whiteLogoPaint)
 
-        // Company Details
-        canvas.drawText(user.businessName.ifBlank { "Apex Enterprises India" }, 80f, y + 25f, headerPaint)
-        val ownerFullName = "Proprietor: ${user.firstName} ${user.middleName} ${user.surname}".replace("\\s+".toRegex(), " ").trim()
-        canvas.drawText("$ownerFullName | Father Name: ${user.fatherName.ifBlank { "N/A" }}", 80f, y + 42f, paint.apply { textSize = 10f })
-        canvas.drawText("GSTIN: ${user.gstin} | Mobile: ${user.phoneNumber} | Email: ${user.email}", 80f, y + 56f, paint.apply { textSize = 10f })
+        // Company Details on the invoice letterhead. The business name used to fall back
+        // to the invented firm "Apex Enterprises India"; the statutory line printed
+        // "GSTIN: " with nothing after it. Blank fields are now omitted entirely so a
+        // half-filled profile cannot read as a complete registered identity.
+        canvas.drawText(user.businessName.ifBlank { "—" }, 80f, y + 25f, headerPaint)
+        val ownerFullName = "${user.firstName} ${user.middleName} ${user.surname}".replace("\\s+".toRegex(), " ").trim()
+        val personLine = listOfNotNull(
+            ownerFullName.takeIf { it.isNotBlank() }?.let { "Proprietor: $it" },
+            user.fatherName.takeIf { it.isNotBlank() }?.let { "Father Name: $it" }
+        ).joinToString(" | ")
+        if (personLine.isNotBlank()) {
+            canvas.drawText(personLine, 80f, y + 42f, paint.apply { textSize = 10f })
+        }
+        val contactLine = listOfNotNull(
+            user.gstin.takeIf { it.isNotBlank() }?.let { "GSTIN: $it" },
+            user.phoneNumber.takeIf { it.isNotBlank() }?.let { "Mobile: $it" },
+            user.email.takeIf { it.isNotBlank() }?.let { "Email: $it" }
+        ).joinToString(" | ")
+        if (contactLine.isNotBlank()) {
+            canvas.drawText(contactLine, 80f, y + 56f, paint.apply { textSize = 10f })
+        }
 
         y += 80f
 
@@ -279,9 +318,11 @@ object PdfInvoiceGenerator {
         canvas.drawText("Amount in Words: ${IndianFormatter.convertNumberToWords(amount)}", 30f, y + 42f, boldPaint.apply { textSize = 10f })
         y += 90f
 
-        // 8. Signatory & Footer
-        canvas.drawText("For ${user.businessName}", 400f, y, boldPaint)
-        
+        // 8. Signatory & Footer (omitted rather than printing a dangling "For ")
+        if (user.businessName.isNotBlank()) {
+            canvas.drawText("For ${user.businessName}", 400f, y, boldPaint)
+        }
+
         // Draw Authorized Signature Bitmap if saved
         val sigFile = File(context.cacheDir, "authorized_signature.png")
         if (sigFile.exists()) {
@@ -317,7 +358,11 @@ object PdfInvoiceGenerator {
                 type = "application/pdf"
                 putExtra(Intent.EXTRA_STREAM, uri)
                 putExtra(Intent.EXTRA_SUBJECT, "$docTitle - ${voucher.voucherNo}")
-                putExtra(Intent.EXTRA_TEXT, "$docTitle for ${voucher.partyName} of total amount ${IndianFormatter.formatRupee(voucher.totalAmount)} from ${user.businessName}")
+                putExtra(
+                    Intent.EXTRA_TEXT,
+                    "$docTitle for ${voucher.partyName} of total amount ${IndianFormatter.formatRupee(voucher.totalAmount)}" +
+                        if (user.businessName.isNotBlank()) " from ${user.businessName}" else ""
+                )
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 

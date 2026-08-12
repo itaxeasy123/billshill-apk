@@ -49,20 +49,28 @@ fun SalesInvoiceDialog(
     val sgst = if (!isInterstate) gstAmount / 2.0 else 0.0
     val igst = if (isInterstate) gstAmount else 0.0
 
-    val invoiceTextSummary = """
-        TAX INVOICE - ${user.businessName}
-        Invoice No: ${voucher.voucherNo}
-        Date: ${IndianFormatter.formatDate(voucher.date)}
-        GSTIN: ${user.gstin}
-        Customer: ${voucher.partyName}
-        ----------------------------------
-        Taxable Value: ${IndianFormatter.formatRupee(taxableValue)}
-        ${if (isInterstate) "IGST: ${IndianFormatter.formatRupee(igst)}" else "CGST: ${IndianFormatter.formatRupee(cgst)}\nSGST: ${IndianFormatter.formatRupee(sgst)}"}
-        Total Amount: ${IndianFormatter.formatRupee(amount)}
-        Amount in Words: ${IndianFormatter.convertNumberToWords(amount)}
-        ----------------------------------
-        Thank you for your business!
-    """.trimIndent()
+    // Identity lines are emitted only when the profile actually holds them. A blank
+    // business name or GSTIN is simply left out of the shared text rather than being
+    // padded with a placeholder that could be read as the real registration.
+    val invoiceTextSummary = buildString {
+        appendLine(if (user.businessName.isNotBlank()) "TAX INVOICE - ${user.businessName}" else "TAX INVOICE")
+        appendLine("Invoice No: ${voucher.voucherNo}")
+        appendLine("Date: ${IndianFormatter.formatDate(voucher.date)}")
+        if (user.gstin.isNotBlank()) appendLine("GSTIN: ${user.gstin}")
+        appendLine("Customer: ${voucher.partyName}")
+        appendLine("----------------------------------")
+        appendLine("Taxable Value: ${IndianFormatter.formatRupee(taxableValue)}")
+        if (isInterstate) {
+            appendLine("IGST: ${IndianFormatter.formatRupee(igst)}")
+        } else {
+            appendLine("CGST: ${IndianFormatter.formatRupee(cgst)}")
+            appendLine("SGST: ${IndianFormatter.formatRupee(sgst)}")
+        }
+        appendLine("Total Amount: ${IndianFormatter.formatRupee(amount)}")
+        appendLine("Amount in Words: ${IndianFormatter.convertNumberToWords(amount)}")
+        appendLine("----------------------------------")
+        append("Thank you for your business!")
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -152,9 +160,23 @@ fun SalesInvoiceDialog(
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
-                                Text(user.businessName.ifBlank { "My Business" }, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = Color.Black)
-                                Text("GSTIN: ${user.gstin.ifBlank { "23BNJPS3408M1ZP" }}", fontSize = 11.sp, color = Color.DarkGray)
-                                Text("State: ${user.state.ifBlank { "Delhi (Code: 07)" }}", fontSize = 11.sp, color = Color.DarkGray)
+                                // Letterhead identity. These three lines used to fall back to
+                                // "My Business", GSTIN "23BNJPS3408M1ZP" and "Delhi (Code: 07)"
+                                // when the profile was blank -- printing a stranger's GST
+                                // registration number on the user's tax invoice. A blank profile
+                                // now prints a neutral dash and omits the statutory lines entirely.
+                                Text(
+                                    text = user.businessName.ifBlank { "—" },
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 15.sp,
+                                    color = Color.Black
+                                )
+                                if (user.gstin.isNotBlank()) {
+                                    Text("GSTIN: ${user.gstin}", fontSize = 11.sp, color = Color.DarkGray)
+                                }
+                                if (user.state.isNotBlank()) {
+                                    Text("State: ${user.state}", fontSize = 11.sp, color = Color.DarkGray)
+                                }
                             }
                             Spacer(modifier = Modifier.width(8.dp))
                             Column(horizontalAlignment = Alignment.End) {
@@ -337,15 +359,30 @@ fun SalesInvoiceDialog(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Dynamic UPI Payment QR Code
-                        com.example.utils.UpiQrCodeView(
-                            vpa = if (user.phoneNumber.isNotBlank()) "${user.phoneNumber}@upi" else "pay.business@upi",
-                            payeeName = user.businessName.ifBlank { "Business Store" },
-                            amount = amount,
-                            invoiceNo = voucher.voucherNo,
-                            size = 180.dp,
-                            modifier = Modifier.align(Alignment.CenterHorizontally)
-                        )
+                        // Dynamic UPI Payment QR Code.
+                        // The payee VPA is derived from the user's own registered mobile number.
+                        // It previously fell back to the invented VPA "pay.business@upi" with
+                        // payee "Business Store" -- a real, scannable payment instruction that
+                        // would have sent the customer's money to an account the user does not
+                        // own. With no mobile number on file there is no VPA, so no QR is drawn.
+                        if (user.phoneNumber.isNotBlank()) {
+                            com.example.utils.UpiQrCodeView(
+                                vpa = "${user.phoneNumber}@upi",
+                                payeeName = user.businessName,
+                                amount = amount,
+                                invoiceNo = voucher.voucherNo,
+                                size = 180.dp,
+                                modifier = Modifier.align(Alignment.CenterHorizontally)
+                            )
+                        } else {
+                            Text(
+                                text = "Add a UPI ID in Settings to show a payment QR on this invoice.",
+                                fontSize = 10.sp,
+                                color = Color.Gray,
+                                textAlign = TextAlign.Center,
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -358,10 +395,18 @@ fun SalesInvoiceDialog(
                             Column {
                                 Text("Terms & Conditions:", fontSize = 9.sp, color = Color.Gray)
                                 Text("• Goods once sold will not be taken back.", fontSize = 9.sp, color = Color.Gray)
-                                Text("• Subject to Delhi Jurisdiction.", fontSize = 9.sp, color = Color.Gray)
+                                // The jurisdiction line was hardcoded to "Delhi" and printed on
+                                // every invoice regardless of where the business actually is --
+                                // a legally meaningful claim the app had no basis for. It now
+                                // follows the saved state, and is dropped when the state is unknown.
+                                if (user.state.isNotBlank()) {
+                                    Text("• Subject to ${user.state} Jurisdiction.", fontSize = 9.sp, color = Color.Gray)
+                                }
                             }
                             Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text("For ${user.businessName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                if (user.businessName.isNotBlank()) {
+                                    Text("For ${user.businessName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.Black)
+                                }
                                 Spacer(modifier = Modifier.height(24.dp))
                                 Text("Authorized Signatory", fontSize = 10.sp, color = Color.DarkGray)
                             }

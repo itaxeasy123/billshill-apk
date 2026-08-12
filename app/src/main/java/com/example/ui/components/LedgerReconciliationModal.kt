@@ -41,7 +41,12 @@ fun LedgerReconciliationModal(
 ) {
     var selectedFilter by remember { mutableStateOf("UNRESOLVED") }
     var resolvingDiscrepancy by remember { mutableStateOf<ReconciliationDiscrepancyEntity?>(null) }
-    var resolutionNotesInput by remember { mutableStateOf("Verified with bank statement / client confirmed") }
+    // Starts empty. This field used to open pre-filled with "Verified with bank statement
+    // / client confirmed" -- an audit note asserting a verification nobody performed,
+    // written straight into the discrepancy record on confirm. The wording survives only
+    // as a placeholder hint, which is not submittable. It is also cleared whenever a
+    // discrepancy is opened or resolved, so one item's note cannot carry over to the next.
+    var resolutionNotesInput by remember { mutableStateOf("") }
 
     val filteredList = remember(discrepancies, selectedFilter) {
         when (selectedFilter) {
@@ -325,7 +330,10 @@ fun LedgerReconciliationModal(
                         items(filteredList, key = { it.id }) { discrepancy ->
                             DiscrepancyItemCard(
                                 discrepancy = discrepancy,
-                                onResolveClick = { resolvingDiscrepancy = discrepancy }
+                                onResolveClick = {
+                                    resolutionNotesInput = ""
+                                    resolvingDiscrepancy = discrepancy
+                                }
                             )
                         }
                     }
@@ -348,7 +356,10 @@ fun LedgerReconciliationModal(
     // Resolve Confirmation Dialog
     resolvingDiscrepancy?.let { item ->
         AlertDialog(
-            onDismissRequest = { resolvingDiscrepancy = null },
+            onDismissRequest = {
+                resolvingDiscrepancy = null
+                resolutionNotesInput = ""
+            },
             title = {
                 Text(
                     text = "Resolve Discrepancy",
@@ -369,7 +380,7 @@ fun LedgerReconciliationModal(
                         value = resolutionNotesInput,
                         onValueChange = { resolutionNotesInput = it },
                         label = { Text("Resolution Notes / Reason") },
-                        placeholder = { Text("e.g. Paid in cash / Discount granted") },
+                        placeholder = { Text("e.g. Verified with bank statement / Paid in cash / Discount granted") },
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth().testTag("resolution_notes_input")
                     )
@@ -380,6 +391,7 @@ fun LedgerReconciliationModal(
                     onClick = {
                         onResolveDiscrepancy(item.id, resolutionNotesInput)
                         resolvingDiscrepancy = null
+                        resolutionNotesInput = ""
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccountingGreen),
                     shape = RoundedCornerShape(12.dp),
@@ -390,7 +402,10 @@ fun LedgerReconciliationModal(
             },
             dismissButton = {
                 OutlinedButton(
-                    onClick = { resolvingDiscrepancy = null },
+                    onClick = {
+                        resolvingDiscrepancy = null
+                        resolutionNotesInput = ""
+                    },
                     shape = RoundedCornerShape(12.dp)
                 ) {
                     Text("Cancel")

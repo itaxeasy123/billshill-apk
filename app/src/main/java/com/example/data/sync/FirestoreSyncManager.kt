@@ -17,7 +17,14 @@ data class CloudBackupPayload(
     val user: UserEntity?,
     val vouchers: List<VoucherEntity>,
     val ledgers: List<LedgerEntity>,
-    val inventory: List<InventoryItemEntity>
+    val inventory: List<InventoryItemEntity>,
+    /**
+     * Cloud voucher records that could not be restored because their `voucherType` was
+     * missing or unrecognised. Callers should surface this rather than treat the restore
+     * as complete: these records were skipped, not recovered. They used to be restored as
+     * SALES regardless of what they had actually been.
+     */
+    val skippedVoucherRefs: List<String> = emptyList()
 )
 
 class FirestoreSyncManager {
@@ -136,11 +143,31 @@ class FirestoreSyncManager {
 
             // Vouchers
             val vouchersSnap = userDocRef.collection("vouchers").get().await()
+            val skippedVoucherRefs = mutableListOf<String>()
             val restoredVouchers = vouchersSnap.documents.mapNotNull { doc ->
                 val id = doc.getLong("id") ?: return@mapNotNull null
                 val vNo = doc.getString("voucherNo") ?: ""
-                val vTypeStr = doc.getString("voucherType") ?: "SALES"
-                val vType = try { VoucherType.valueOf(vTypeStr) } catch (e: Exception) { VoucherType.SALES }
+                // A cloud record with a missing or unrecognised voucher type is skipped and
+                // reported. It used to default to SALES twice over -- once for a missing
+                // field, once for an unparseable one -- so a payment or a contra entry whose
+                // type had been lost came back as revenue and silently overstated turnover.
+                val vTypeStr = doc.getString("voucherType")
+                val vType = vTypeStr?.let { raw ->
+                    try {
+                        VoucherType.valueOf(raw)
+                    } catch (e: Exception) {
+                        null
+                    }
+                }
+                if (vType == null) {
+                    skippedVoucherRefs.add(vNo.ifBlank { doc.id })
+                    Log.w(
+                        "FirestoreSyncManager",
+                        "Skipping cloud voucher ${vNo.ifBlank { doc.id }}: voucherType is " +
+                            (if (vTypeStr == null) "missing" else "unrecognised ('$vTypeStr')")
+                    )
+                    return@mapNotNull null
+                }
                 val date = doc.getLong("date") ?: System.currentTimeMillis()
                 val party = doc.getString("partyName") ?: ""
                 val total = doc.getDouble("totalAmount") ?: 0.0
@@ -217,7 +244,18 @@ class FirestoreSyncManager {
                 )
             }
 
-            Result.success(CloudBackupPayload(null, restoredVouchers, restoredLedgers, restoredInv))
+            // A restore that silently dropped records would be its own kind of lie, so the
+            // skipped vouchers travel back to the caller on the payload rather than being
+            // quietly omitted.
+            Result.success(
+                CloudBackupPayload(
+                    user = null,
+                    vouchers = restoredVouchers,
+                    ledgers = restoredLedgers,
+                    inventory = restoredInv,
+                    skippedVoucherRefs = skippedVoucherRefs
+                )
+            )
         } catch (e: Exception) {
             Log.e("FirestoreSyncManager", "Restore failed", e)
             Result.failure(e)

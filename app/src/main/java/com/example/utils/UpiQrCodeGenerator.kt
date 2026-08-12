@@ -113,7 +113,13 @@ fun UpiQrCodeView(
     modifier: Modifier = Modifier,
     size: Dp = 220.dp
 ) {
-    val upiString = "upi://pay?pa=$vpa&pn=${payeeName.replace(" ", "%20")}&am=%.2f&cu=INR&tn=Invoice%20${invoiceNo.replace(" ", "%20")}".format(amount)
+    // The amount is formatted on its own and then spliced in. This line used to call
+    // .format(amount) on the whole URL, but the URL contains literal "%20" escapes, so
+    // java.util.Formatter parsed "%20I..." as a format specifier and threw
+    // UnknownFormatConversionException: Conversion = 'I' every single time a QR was
+    // rendered. Locale.US keeps the decimal separator a dot, as UPI requires.
+    val amountText = String.format(java.util.Locale.US, "%.2f", amount)
+    val upiString = "upi://pay?pa=$vpa&pn=${payeeName.replace(" ", "%20")}&am=$amountText&cu=INR&tn=Invoice%20${invoiceNo.replace(" ", "%20")}"
     val matrix = UpiQrCodeEncoder.encodeToMatrix(upiString)
     val gridSize = matrix.size
 

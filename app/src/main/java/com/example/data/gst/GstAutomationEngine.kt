@@ -5,7 +5,6 @@ import android.os.Environment
 import android.util.Log
 import com.example.ai.LocalAiReconciliationEngine
 import com.example.data.db.AppDatabase
-import com.example.data.model.UserEntity
 import com.example.data.model.VoucherEntity
 import com.example.data.model.VoucherType
 import com.example.utils.TelemetryEngine
@@ -45,22 +44,36 @@ object GstAutomationEngine {
             val db = AppDatabase.getDatabase(context)
             val accountingDao = db.accountingDao()
 
-            // 1. Fetch Business Profile
-            val userProfile = accountingDao.getUserSync() ?: UserEntity(
-                id = "primary_user",
-                phoneNumber = "+919876543210",
-                token = "demo_token",
-                businessName = "Apex Enterprises India",
-                gstin = "07AAAAA1234A1Z5",
-                state = "Delhi"
-            )
+            // 1. Fetch Business Profile.
+            // This block used to manufacture an entire business identity when the profile
+            // was missing -- "Apex Enterprises India", phone +919876543210, and GSTIN
+            // 07AAAAA1234A1Z5 -- and a second fallback substituted that same GSTIN when the
+            // real one was empty. Both wrote a GSTIN belonging to nobody into a payload
+            // intended for a government return. An export with no verified GSTIN is not a
+            // valid return, so it now fails loudly instead of filing under a made-up number.
+            val userProfile = accountingDao.getUserSync()
+                ?: throw IllegalStateException(
+                    "GST export aborted: no business profile saved. Add your business details and GSTIN in Settings before exporting."
+                )
+
+            val clientGstin = userProfile.gstin.trim()
+            if (clientGstin.isEmpty()) {
+                throw IllegalStateException(
+                    "GST export aborted: your GSTIN is not set. Add your GSTIN in Settings before exporting a GSTR-1 / GSTR-3B payload."
+                )
+            }
 
             // Extract 2-digit Profile State Code (e.g. "07" from "07AAAAA1234A1Z5")
-            val clientGstin = userProfile.gstin.trim().ifEmpty { "07AAAAA1234A1Z5" }
             val clientStateCode = if (clientGstin.length >= 2 && clientGstin.substring(0, 2).all { it.isDigit() }) {
                 clientGstin.substring(0, 2)
             } else {
+                // No longer silently defaults to Delhi -- an unrecognised state name is
+                // reported so the user can correct it rather than being filed as "07".
                 getStateCodeFromStateName(userProfile.state)
+                    ?: throw IllegalStateException(
+                        "GST export aborted: could not determine your state code. GSTIN '$clientGstin' has no numeric state prefix and the saved state " +
+                            (if (userProfile.state.isBlank()) "is empty." else "'${userProfile.state}' is not a recognised Indian state.")
+                    )
             }
 
             val currentPeriod = SimpleDateFormat("MMyyyy", Locale.US).format(Date())
@@ -94,7 +107,14 @@ object GstAutomationEngine {
                 val posStateCode = if (partyGstin.length >= 2 && partyGstin.substring(0, 2).all { it.isDigit() }) {
                     partyGstin.substring(0, 2)
                 } else if (partyLedger?.state?.isNotBlank() == true) {
+                    // An unrecognised state name used to resolve to "07" (Delhi), which
+                    // silently changes the place of supply and therefore the CGST/SGST vs
+                    // IGST split on a filed return. It is now reported instead of guessed.
                     getStateCodeFromStateName(partyLedger.state)
+                        ?: throw IllegalStateException(
+                            "GST export aborted: party '${voucher.partyName}' (invoice #${voucher.voucherNo}) has an unrecognised state '${partyLedger.state}'. " +
+                                "Correct the state on that ledger before exporting."
+                        )
                 } else {
                     clientStateCode // Default to Intrastate if unassigned
                 }
@@ -204,18 +224,26 @@ object GstAutomationEngine {
 
             val b2bGroups = b2bMap.map { (ctin, invList) -> Gstr1B2bGroup(ctin, invList) }
 
+            // Document-issued summary. When there are no sales invoices in the period this
+            // used to emit a made-up invoice range "INV-0001" to "INV-0001" against a count
+            // of zero -- a document series the user never issued. An empty period now
+            // reports an empty series.
             val docSummary = Gstr1DocSummary(
-                docDet = listOf(
-                    Gstr1DocDetail(
-                        docNum = 1,
-                        docTyp = "Invoices for outward supply",
-                        from = invoiceSeqStart.ifEmpty { "INV-0001" },
-                        to = invoiceSeqEnd.ifEmpty { "INV-0001" },
-                        totcnt = salesInvoiceCount,
-                        cancel = 0,
-                        netIssue = salesInvoiceCount
+                docDet = if (salesInvoiceCount > 0) {
+                    listOf(
+                        Gstr1DocDetail(
+                            docNum = 1,
+                            docTyp = "Invoices for outward supply",
+                            from = invoiceSeqStart,
+                            to = invoiceSeqEnd,
+                            totcnt = salesInvoiceCount,
+                            cancel = 0,
+                            netIssue = salesInvoiceCount
+                        )
                     )
-                )
+                } else {
+                    emptyList()
+                }
             )
 
             val gstr1Payload = Gstr1Payload(
@@ -352,7 +380,12 @@ object GstAutomationEngine {
         return if (value < 0.0) 0.0 else value
     }
 
-    private fun getStateCodeFromStateName(stateName: String): String {
+    /**
+     * Maps an Indian state name to its 2-digit GST state code, or null when the name is
+     * blank or unrecognised. This used to end in `else -> "07"`, which quietly filed every
+     * unknown state as Delhi; callers now surface the unresolved name instead.
+     */
+    private fun getStateCodeFromStateName(stateName: String): String? {
         return when (stateName.trim().lowercase(Locale.US)) {
             "jammu & kashmir", "jammu and kashmir" -> "01"
             "himachal pradesh" -> "02"
@@ -390,7 +423,7 @@ object GstAutomationEngine {
             "andaman & nicobar islands" -> "35"
             "telangana" -> "36"
             "ladakh" -> "38"
-            else -> "07"
+            else -> null
         }
     }
 }

@@ -151,10 +151,17 @@ object TelemetryEngine {
         return lastCrashReportJson
     }
 
-    fun generateAnalyticsReportJson(
-        avgQuerySpeedMs: Long = 12L,
-        avgRenderingLatencyMs: Long = 16L
-    ): String {
+    /**
+     * Builds the user analytics payload from what was actually recorded.
+     *
+     * The performance block used to report `averageDatabaseQuerySpeedMs = 12` and
+     * `averageRenderingLatencyMs = 16` from default parameter values that no caller ever
+     * overrode. Nothing measures rendering latency at all, and `recordQueryLatency()` has
+     * no call sites, so both numbers were invented and printed as measurements. Query
+     * speed is now averaged over whatever `recordQueryLatency()` actually logged, and both
+     * metrics are omitted from the JSON entirely when there is nothing to average.
+     */
+    fun generateAnalyticsReportJson(): String {
         val engagementArray = JSONArray()
         featureEngagementCount.forEach { (feature, count) ->
             engagementArray.put(JSONObject().apply {
@@ -164,12 +171,16 @@ object TelemetryEngine {
         }
 
         val queriesArray = JSONArray()
+        var measuredAvgQueryMs: Long? = null
         synchronized(queryLatencyLog) {
             queryLatencyLog.takeLast(10).forEach { (q, timeMs) ->
                 queriesArray.put(JSONObject().apply {
                     put("queryName", q)
                     put("executionTimeMs", timeMs)
                 })
+            }
+            if (queryLatencyLog.isNotEmpty()) {
+                measuredAvgQueryMs = queryLatencyLog.map { it.second }.average().toLong()
             }
         }
 
@@ -183,9 +194,19 @@ object TelemetryEngine {
                 put("sdkVersion", Build.VERSION.SDK_INT)
             })
             put("performanceMetrics", JSONObject().apply {
-                put("averageDatabaseQuerySpeedMs", avgQuerySpeedMs)
-                put("averageRenderingLatencyMs", avgRenderingLatencyMs)
-                put("fpsTarget", 60)
+                // Only genuinely measured values appear here. Rendering latency is not
+                // instrumented anywhere in the app, so it is reported as not measured
+                // rather than as a plausible "16 ms".
+                val avg = measuredAvgQueryMs
+                if (avg != null) {
+                    put("averageDatabaseQuerySpeedMs", avg)
+                    put("databaseQuerySamples", queriesArray.length())
+                } else {
+                    put("averageDatabaseQuerySpeedMs", JSONObject.NULL)
+                    put("note", "No database query latency has been recorded on this device.")
+                }
+                put("averageRenderingLatencyMs", JSONObject.NULL)
+                put("renderingLatencyNote", "Not instrumented — no rendering latency is measured.")
             })
             put("featureEngagement", engagementArray)
             put("recentDatabaseQueries", queriesArray)
@@ -194,14 +215,25 @@ object TelemetryEngine {
         return json.toString(2)
     }
 
+    /**
+     * Returns the most recent crash payload recorded in this process, or an explicit
+     * "no crashes" result.
+     *
+     * This used to manufacture an `IllegalStateException("Diagnostic test exception for
+     * telemetry boundary check")` whenever nothing had crashed, complete with a real
+     * timestamp, device name and stack trace -- so a healthy app displayed what looked
+     * like a genuine crash report under "Crash Diagnostics".
+     */
     fun getLatestCrashLogJson(): String {
-        return if (lastCrashReportJson.isNotEmpty()) {
-            lastCrashReportJson
-        } else {
-            generateCrashReportJson(
-                IllegalStateException("Diagnostic test exception for telemetry boundary check"),
-                "Normal Operational State"
-            )
-        }
+        if (lastCrashReportJson.isNotEmpty()) return lastCrashReportJson
+
+        return JSONObject().apply {
+            put("telemetryType", "MOBILE_CRASH_REPORT")
+            put("timestamp", SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).format(Date()))
+            put("device_name", "${Build.MANUFACTURER} ${Build.MODEL}")
+            put("crashCount", 0)
+            put("status", "NO_CRASHES_RECORDED")
+            put("message", "No crashes have been recorded on this device since the app was last started.")
+        }.toString(2)
     }
 }

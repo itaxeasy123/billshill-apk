@@ -159,7 +159,10 @@ fun QuickEntryBottomSheet(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = "ML Predicted Contra Accounts:",
+                        // Was "ML Predicted Contra Accounts:". There is no model behind these
+                        // -- they come from counting the user's past vouchers and from a few
+                        // substring rules -- so the label no longer claims a prediction.
+                        text = "Suggested Contra Accounts:",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = RoyalPurplePrimary
@@ -182,7 +185,13 @@ fun QuickEntryBottomSheet(
                             },
                             label = {
                                 Text(
-                                    text = "${suggestion.accountName} (${suggestion.probabilityScore}%)",
+                                    // The percentage is shown only when it was actually
+                                    // computed from the user's own voucher history. Keyword
+                                    // suggestions carry no score and now show none, instead
+                                    // of a hardcoded number presented as ML confidence.
+                                    text = suggestion.matchConfidencePercent
+                                        ?.let { "${suggestion.accountName} ($it% of past entries)" }
+                                        ?: suggestion.accountName,
                                     fontSize = 11.sp
                                 )
                             },

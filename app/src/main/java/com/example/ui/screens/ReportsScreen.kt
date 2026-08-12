@@ -44,6 +44,8 @@ import com.example.ui.components.ExportDataButton
 import com.example.ui.components.HierarchicalFinancialStatement
 import com.example.ui.components.StatementType
 import com.example.ui.components.VoucherBreakdownModal
+import com.example.ui.components.TallyBalanceSheetView
+import com.example.ui.components.TallyProfitAndLossView
 import kotlinx.coroutines.launch
 
 @Composable
@@ -94,6 +96,8 @@ fun ReportsScreen(
     }
 
     val trialBalance by viewModel.trialBalanceState.collectAsState()
+    val balanceSheet by viewModel.balanceSheetState.collectAsState()
+    val profitAndLoss by viewModel.profitAndLossState.collectAsState()
     val gstSummary by viewModel.gstSummaryState.collectAsState()
     val totalSales by viewModel.totalSalesState.collectAsState()
     val totalPurchases by viewModel.totalPurchasesState.collectAsState()
@@ -590,12 +594,13 @@ fun ReportsScreen(
                             )
                         }
 
-                        HierarchicalFinancialStatement(
-                            statementType = StatementType.PROFIT_LOSS,
+                        TallyProfitAndLossView(
+                            pnl = profitAndLoss,
                             user = user,
-                            vouchers = allVouchers,
-                            trialBalance = trialBalance,
-                            viewModel = viewModel
+                            periodLabel = dateRangeState.displayLabel,
+                            onSelectLedger = { ledgerId, _ ->
+                                selectedLedgerForStatement = trialBalance.firstOrNull { it.id == ledgerId }
+                            }
                         )
                     }
                 }
@@ -619,12 +624,13 @@ fun ReportsScreen(
                             )
                         }
 
-                        HierarchicalFinancialStatement(
-                            statementType = StatementType.BALANCE_SHEET,
+                        TallyBalanceSheetView(
+                            sheet = balanceSheet,
                             user = user,
-                            vouchers = allVouchers,
-                            trialBalance = trialBalance,
-                            viewModel = viewModel
+                            asOnLabel = dateRangeState.displayLabel,
+                            onSelectLedger = { ledgerId, _ ->
+                                selectedLedgerForStatement = trialBalance.firstOrNull { it.id == ledgerId }
+                            }
                         )
                     }
                 }
@@ -744,49 +750,27 @@ fun ReportsScreen(
                             MonetaryRow(label = "B2C Small Count: ${b2cSmall.size} Invoices", amount = b2cSmall.sumOf { it.totalAmount })
 
                             Spacer(modifier = Modifier.height(16.dp))
-                            Text("4. Outbound Tax Invoices Summarized by GST Rate (For Quick Filing)", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
+                            Text("4. Outbound Tax Invoices Summarized by GST Rate", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // Calculate GST Rate Summaries (5%, 12%, 18%, 28%)
-                            val gstRates = listOf(5.0, 12.0, 18.0, 28.0)
-                            val totalOutboundTaxable = outboundSales.sumOf { it.totalAmount - it.gstAmount }
-
-                            gstRates.forEach { rate ->
-                                val proportion = when (rate) {
-                                    5.0 -> 0.10
-                                    12.0 -> 0.20
-                                    18.0 -> 0.60
-                                    28.0 -> 0.10
-                                    else -> 0.0
-                                }
-                                val taxableAmt = totalOutboundTaxable * proportion
-                                val totalTaxForRate = taxableAmt * (rate / 100.0)
-                                val cgst = totalTaxForRate / 2.0
-                                val sgst = totalTaxForRate / 2.0
-
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = LavenderContainer.copy(alpha = 0.6f),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(vertical = 4.dp)
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .padding(12.dp)
-                                            .fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1.2f)) {
-                                            Text("GST Slab ${rate.toInt()}%", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = DarkPurpleVariant)
-                                            Text("Taxable: ${IndianFormatter.formatRupee(taxableAmt)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        Column(horizontalAlignment = Alignment.End, modifier = Modifier.weight(1f)) {
-                                            Text("Tax: ${IndianFormatter.formatRupee(totalTaxForRate)}", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
-                                            Text("CGST: ${IndianFormatter.formatRupee(cgst, false)} | SGST: ${IndianFormatter.formatRupee(sgst, false)}", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                    }
+                            // Per-slab figures are not available and are no longer estimated.
+                            // This section used to split the real taxable total across the four
+                            // slabs by fixed invented proportions -- 10% at 5%, 20% at 12%, 60%
+                            // at 18% and 10% at 28% -- and label the result "For Quick Filing".
+                            // Vouchers store one blended GST amount, not per-line rates, so the
+                            // slab split cannot be derived from what the app records.
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Not available", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "A per-slab breakdown (5% / 12% / 18% / 28%) needs the tax rate recorded against each invoice line. Vouchers currently store a single GST amount per invoice, so these figures cannot be produced without guessing.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
 
@@ -794,29 +778,23 @@ fun ReportsScreen(
                             Text("5. HSN / SAC Summary Breakdown", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                listOf(
-                                    Triple("HSN 8471 (Computers & IT Hardware)", "18%", outboundSales.sumOf { it.totalAmount * 0.6 }),
-                                    Triple("HSN 8517 (Telecom & Electronics)", "18%", outboundSales.sumOf { it.totalAmount * 0.25 }),
-                                    Triple("SAC 9983 (Professional Consultations)", "18%", outboundSales.sumOf { it.totalAmount * 0.15 })
-                                ).forEach { (hsn, rate, valAmt) ->
-                                    Surface(
-                                        shape = RoundedCornerShape(10.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(10.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Column {
-                                                Text(hsn, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                                Text("GST Rate: $rate", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            }
-                                            Text(IndianFormatter.formatRupee(valAmt), style = MonospaceTabularTextStyle, fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                        }
-                                    }
+                            // Also not available. This used to list three invented commodity
+                            // codes -- HSN 8471 "Computers & IT Hardware", HSN 8517 "Telecom &
+                            // Electronics" and SAC 9983 "Professional Consultations" -- and
+                            // apportion real sales across them 60/25/15, describing goods the
+                            // user may never have traded in.
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text("Not available", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text(
+                                        text = "An HSN/SAC summary needs the commodity code captured on each invoice line. Vouchers are recorded at invoice level only, so there is no line-item data to summarise here.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -976,41 +954,12 @@ fun ReportsScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                             }
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            val benchmarkLimit = 100000.0
-                            val progress = (Math.abs(ledger.currentBalance) / benchmarkLimit).coerceIn(0.0, 1.0).toFloat()
-                            val progressColor = when {
-                                progress > 0.85f -> AccountingRed
-                                progress > 0.50f -> DeepPurpleSecondary
-                                else -> AccountingGreen
-                            }
-
-                            LinearProgressIndicator(
-                                progress = progress,
-                                color = progressColor,
-                                trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(8.dp)
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Text(
-                                    text = if (progress >= 0.85f) "High Volume / Limit Alert" else "Normal Budget",
-                                    fontSize = 10.sp,
-                                    color = progressColor,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    text = "${(progress * 100).toInt()}% of ₹1L Target",
-                                    fontSize = 10.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
+                            // The progress bar that used to sit here measured every ledger
+                            // against a hardcoded `benchmarkLimit = 100000.0` and captioned it
+                            // "% of ₹1L Target" with a "Normal Budget" / "High Volume / Limit
+                            // Alert" verdict. The user never set a ₹1 lakh budget on anything,
+                            // so both the bar and its verdict were invented. Removed rather
+                            // than replaced -- the app has no budget feature to draw from.
                         }
                     }
                 }
@@ -1091,7 +1040,13 @@ fun ReportsScreen(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    var merchantNoteText by remember { mutableStateOf("Sharma ji kirana - Rs.15000 with 18% tax state 07 inum INV202608110001928374") }
+                                    // Starts empty. This field used to open pre-filled with a
+                                    // complete invented transaction -- party "Sharma ji kirana",
+                                    // ₹15,000, 18% tax, state 07, invoice
+                                    // INV202608110001928374 -- which parsed into a plausible
+                                    // GST entry the user never entered. The example now lives
+                                    // in the placeholder, which cannot be submitted.
+                                    var merchantNoteText by remember { mutableStateOf("") }
                                     var parsedResultNote by remember { mutableStateOf<com.example.ai.LocalAiReconciliationEngine.ParsedMerchantNote?>(null) }
                                     var autoExportStatus by remember { mutableStateOf(com.example.data.gst.GstAutomationEngine.getLastExportStatus(context)) }
                                     val coroutineScope = rememberCoroutineScope()
@@ -1100,6 +1055,7 @@ fun ReportsScreen(
                                         value = merchantNoteText,
                                         onValueChange = { merchantNoteText = it },
                                         label = { Text("Raw Merchant Note (Jama/Udhar)", fontSize = 10.sp) },
+                                        placeholder = { Text("e.g. Sharma ji kirana - Rs.15000 with 18% tax state 07", fontSize = 10.sp) },
                                         modifier = Modifier.fillMaxWidth().testTag("raw_merchant_note_input"),
                                         shape = RoundedCornerShape(10.dp),
                                         singleLine = true
@@ -1112,6 +1068,7 @@ fun ReportsScreen(
                                             onClick = {
                                                 parsedResultNote = com.example.ai.LocalAiReconciliationEngine.reconcileAndCleanNote(merchantNoteText)
                                             },
+                                            enabled = merchantNoteText.isNotBlank(),
                                             shape = RoundedCornerShape(10.dp),
                                             colors = ButtonDefaults.buttonColors(containerColor = DeepPurpleSecondary),
                                             modifier = Modifier.weight(1f).testTag("ai_parse_note_btn")
@@ -1151,10 +1108,31 @@ fun ReportsScreen(
                                             color = MaterialTheme.colorScheme.surface,
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
+                                            // Anything the parser did not actually find in the
+                                            // note now reads "not detected". These lines used to
+                                            // print the engine's invented defaults -- customer
+                                            // "Cash Customer", rate 18%, POS "07", invoice
+                                            // "INV-001" -- under an "AI Extracted" heading.
                                             Column(modifier = Modifier.padding(10.dp)) {
-                                                Text("AI Extracted Customer: ${note.customerName}", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
-                                                Text("Taxable Value: ₹${note.taxableValue} | Rate: ${note.taxRate}% | POS: ${note.stateCode}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurface)
-                                                Text("Cleaned inum (max 16 chars): ${note.invoiceNumber}", fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = AccountingGreen)
+                                                Text(
+                                                    text = "Extracted Customer: ${note.customerName ?: "not detected"}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = RoyalPurplePrimary
+                                                )
+                                                Text(
+                                                    text = "Taxable Value: ${note.taxableValue?.let { "₹$it" } ?: "not detected"}" +
+                                                        " | Rate: ${note.taxRate?.let { "$it%" } ?: "not detected"}" +
+                                                        " | POS: ${note.stateCode ?: "not detected"}",
+                                                    fontSize = 11.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = "Cleaned inum (max 16 chars): ${note.invoiceNumber ?: "not detected"}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    color = AccountingGreen
+                                                )
                                             }
                                         }
                                     }
@@ -1173,10 +1151,12 @@ fun ReportsScreen(
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            MonetaryRow(label = "Opening GST Ledger Balance", amount = 0.0)
+                            // "Opening GST Ledger Balance" was hardcoded to 0.0 and the row below
+                            // it ("Balance after ITC Offset") simply restated the ITC total on
+                            // that assumption. The app carries no opening balance for the GST
+                            // duty ledgers, so asserting zero was a claim it could not support.
+                            // Both rows removed; the ITC and liability figures below are real.
                             MonetaryRow(label = "+ Input Tax Credit (Purchases ITC)", amount = totalInputGst, amountColor = AccountingGreen)
-                            Divider(modifier = Modifier.padding(vertical = 6.dp))
-                            MonetaryRow(label = "Balance after ITC Offset", amount = totalInputGst, amountColor = RoyalPurplePrimary)
 
                             Spacer(modifier = Modifier.height(12.dp))
                             MonetaryRow(label = "- Output Tax Liability (Sales Tax)", amount = totalOutputGst, amountColor = AccountingRed)

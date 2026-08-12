@@ -32,12 +32,18 @@ fun CustomVoucherModal(
     viewModel: AccountingViewModel,
     onDismiss: () -> Unit
 ) {
+    // All fields start empty. This form used to open pre-filled with a complete vehicle
+    // purchase -- preset "Car / Vehicle Purchase", debit "Car Account (Fixed Asset)",
+    // credit "Cash-in-hand" and the narration "Purchase of vehicle for business/personal
+    // use" -- so typing an amount and tapping Save posted a fabricated asset purchase
+    // into the books. The preset chips below remain, but as choices the user taps rather
+    // than one silently pre-selected for them.
     var voucherType by remember { mutableStateOf(VoucherType.PAYMENT) }
-    var purposePreset by remember { mutableStateOf("Car / Vehicle Purchase") }
-    var debitLedgerName by remember { mutableStateOf("Car Account (Fixed Asset)") }
-    var creditLedgerName by remember { mutableStateOf("Cash-in-hand") }
+    var purposePreset by remember { mutableStateOf("") }
+    var debitLedgerName by remember { mutableStateOf("") }
+    var creditLedgerName by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
-    var narration by remember { mutableStateOf("Purchase of vehicle for business/personal use") }
+    var narration by remember { mutableStateOf("") }
 
     val presetOptions = listOf(
         "Car / Vehicle Purchase" to Triple(VoucherType.PAYMENT, "Vehicle Asset Account", "Paid for vehicle purchase"),
@@ -200,11 +206,18 @@ fun CustomVoucherModal(
                         value = narration,
                         onValueChange = { narration = it },
                         label = { Text("Narration / Remarks") },
+                        placeholder = { Text("e.g. Paid for vehicle purchase") },
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
                     )
 
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // Save is blocked until both ledgers and a positive amount are entered,
+                    // so an empty form can no longer post a voucher.
+                    val canSaveVoucher = debitLedgerName.isNotBlank() &&
+                        creditLedgerName.isNotBlank() &&
+                        (amountText.trim().toDoubleOrNull() ?: 0.0) > 0.0
 
                     Button(
                         onClick = {
@@ -217,6 +230,7 @@ fun CustomVoucherModal(
                             )
                             onDismiss()
                         },
+                        enabled = canSaveVoucher,
                         colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier

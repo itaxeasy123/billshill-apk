@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material.icons.filled.CalendarToday
 import androidx.compose.material.icons.filled.ArrowDropDown
+import com.example.data.dao.MonthlyPnlRow
+import com.example.data.model.LedgerCategory
 import com.example.data.model.UserEntity
 import com.example.data.model.VoucherEntity
 import com.example.data.model.VoucherType
@@ -105,6 +107,9 @@ fun DashboardScreen(
     val isReconciling by viewModel.isReconcilingState.collectAsState()
     val autoReconciliationEnabled by viewModel.autoReconciliationEnabledState.collectAsState()
     val lastReconciliationTime by viewModel.lastReconciliationTimeState.collectAsState()
+    // Real per-month revenue/expense buckets for the trend chart below, replacing the
+    // hardcoded ratios that chart used to draw.
+    val monthlyPnlRows by viewModel.monthlyPnlState.collectAsState()
 
     var selectedDashboardTab by remember { mutableStateOf(0) }
     val dashboardTabs = listOf("Overview", "Sales", "Purchase", "Petty Cash", "Scheduled Reminders", "Receipt & Payment", "Excel / PDF Import")
@@ -121,6 +126,13 @@ fun DashboardScreen(
     var showReconciliationModal by remember { mutableStateOf(false) }
     var selectedFiscalYear by remember { mutableStateOf(FiscalYearOption.ALL_TIME) }
     val context = LocalContext.current
+
+    // Hoisted out of the "Scheduled Reminders" tab so the list of alarms the user has
+    // actually scheduled can be rendered below the form. It used to be declared inside
+    // the form's own `item {}` block and was therefore unreachable from the list section,
+    // which instead displayed one hardcoded card ("Anand Traders / ₹24,500 / Due
+    // Tomorrow") to every user on every install.
+    val reminderScheduledList = remember { mutableStateListOf<com.example.service.PaymentReminderItem>() }
 
     var editingVoucher by remember { mutableStateOf<VoucherEntity?>(null) }
     var editPartyName by remember { mutableStateOf("") }
@@ -781,7 +793,11 @@ fun DashboardScreen(
 
                 // Income Expense Chart & GST Summary Card
                 item {
-                    IncomeExpenseChartCard(totalIncome = totalFilteredSales, totalExpense = totalFilteredPurchases)
+                    IncomeExpenseChartCard(
+                        monthlyPnlRows = monthlyPnlRows,
+                        totalIncome = totalFilteredSales,
+                        totalExpense = totalFilteredPurchases
+                    )
                     Spacer(modifier = Modifier.height(14.dp))
 
                     Card(
@@ -1146,7 +1162,6 @@ fun DashboardScreen(
                     var reminderAmountText by remember { mutableStateOf("") }
                     var reminderType by remember { mutableStateOf("COLLECTION") }
                     var reminderDaysOffset by remember { mutableStateOf(1) }
-                    val reminderScheduledList = remember { mutableStateListOf<com.example.service.PaymentReminderItem>() }
                     val context = LocalContext.current
 
                     Card(
@@ -1271,26 +1286,59 @@ fun DashboardScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                item {
-                    Card(
-                        shape = RoundedCornerShape(16.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(14.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
+                // Renders the alarms the user has actually scheduled in this session. This
+                // block previously ignored `reminderScheduledList` entirely and rendered a
+                // single invented reminder -- "Anand Traders (Customer Collection) / Pending
+                // Amount: ₹24,500 / Due Tomorrow at 10:00 AM" -- unconditionally, so every
+                // user saw a debt owed by a customer they had never heard of.
+                if (reminderScheduledList.isEmpty()) {
+                    item {
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
                         ) {
-                            Column {
-                                Text("Anand Traders (Customer Collection)", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                Text("Pending Amount: ₹24,500 • Due Tomorrow at 10:00 AM", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Column(modifier = Modifier.padding(14.dp)) {
+                                Text("No reminders scheduled", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                Text(
+                                    text = "Alarms you set above will be listed here.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = AccountingGreen.copy(alpha = 0.15f)
+                        }
+                    }
+                } else {
+                    items(reminderScheduledList) { reminder ->
+                        Card(
+                            shape = RoundedCornerShape(16.dp),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text("SCHEDULED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccountingGreen, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "${reminder.partyName} (${if (reminder.reminderType == "COLLECTION") "Customer Collection" else "Vendor Payment"})",
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 13.sp
+                                    )
+                                    Text(
+                                        text = "Pending Amount: ${IndianFormatter.formatRupee(reminder.amount)} • Due ${IndianFormatter.formatDateWithTime(reminder.scheduledTimeMillis)}",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AccountingGreen.copy(alpha = 0.15f)
+                                ) {
+                                    Text("SCHEDULED", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = AccountingGreen, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp))
+                                }
                             }
                         }
                     }
@@ -1600,7 +1648,9 @@ fun DashboardScreen(
             onDismissRequest = { showQrScannerDialog = false },
             onInvoiceScanned = { scannedData ->
                 showQrScannerDialog = false
-                Toast.makeText(context, "Scanned Invoice: ${scannedData.partyName} (₹${scannedData.amount})", Toast.LENGTH_LONG).show()
+                // No longer says "Scanned" -- the dialog has no camera or OCR; these values
+                // are typed by the user.
+                Toast.makeText(context, "Invoice details entered: ${scannedData.partyName} (₹${scannedData.amount})", Toast.LENGTH_LONG).show()
                 onNavigateToVouchers(scannedData.voucherType)
             }
         )
@@ -1719,16 +1769,19 @@ fun DocumentExtractImportSection(
     var documentType by remember { mutableStateOf("Bank Statement (PDF/Excel)") }
     var importedSuccessMessage by remember { mutableStateOf<String?>(null) }
 
+    // A line that cannot be read is reported as unreadable, never completed with invented
+    // values. This block used to fall back to `?: "Today"` for a missing date,
+    // `?: "General Account"` for a missing party, and -- worst of all -- `?: 1000.0` for a
+    // missing amount, which turned any unparseable statement line into a ₹1,000 voucher
+    // that then validated as VALID and was written to the ledger on import.
     val parsedLines = remember(rawText) {
+        val dateRegex = Regex(".*\\d{1,4}[-/.]\\d{1,2}[-/.]\\d{1,4}.*")
         rawText.lines().filter { it.isNotBlank() }.mapNotNull { line ->
             val parts = line.split(Regex("[,;\t|]+")).map { it.trim() }.filter { it.isNotEmpty() }
             if (parts.size >= 2) {
-                val date = parts.firstOrNull { it.matches(Regex(".*\\d{1,4}[-/.]\\d{1,2}[-/.]\\d{1,4}.*")) }
-                    ?: parts.getOrNull(0) ?: "Today"
-                val party = parts.firstOrNull { !it.matches(Regex(".*\\d{1,4}[-/.]\\d{1,2}[-/.]\\d{1,4}.*")) && it.toDoubleOrNull() == null }
-                    ?: parts.getOrNull(1) ?: "General Account"
+                val date = parts.firstOrNull { it.matches(dateRegex) }.orEmpty()
+                val party = parts.firstOrNull { !it.matches(dateRegex) && it.toDoubleOrNull() == null }.orEmpty()
                 val amount = parts.mapNotNull { it.replace("Rs", "").replace("₹", "").replace(",", "").toDoubleOrNull() }.lastOrNull()
-                    ?: 1000.0
                 val typeStr = line.uppercase()
                 val voucherType = when {
                     typeStr.contains("RECEIPT") || typeStr.contains("DEPOSIT") || typeStr.contains("CREDIT") -> VoucherType.RECEIPT
@@ -1737,7 +1790,18 @@ fun DocumentExtractImportSection(
                     typeStr.contains("PURCHASE") -> VoucherType.PURCHASE
                     else -> VoucherType.PAYMENT
                 }
-                ParsedEntryRow(date, party, voucherType, amount)
+                val missing = buildList {
+                    if (date.isBlank()) add("date")
+                    if (party.isBlank()) add("party name")
+                    if (amount == null) add("amount")
+                }
+                ParsedEntryRow(
+                    date = date,
+                    party = party,
+                    voucherType = voucherType,
+                    amount = amount ?: 0.0,
+                    missingFields = missing.joinToString(", ")
+                )
             } else null
         }
     }
@@ -1756,6 +1820,7 @@ fun DocumentExtractImportSection(
             val isInvalidAmount = entry.amount <= 0.0
 
             val status = when {
+                entry.missingFields.isNotBlank() -> ValidationStatus.UNPARSEABLE
                 isDuplicate -> ValidationStatus.DUPLICATE
                 isTypeMismatch -> ValidationStatus.TYPE_MISMATCH
                 isInvalidAmount -> ValidationStatus.INVALID_AMOUNT
@@ -1763,6 +1828,7 @@ fun DocumentExtractImportSection(
             }
 
             val reason = when (status) {
+                ValidationStatus.UNPARSEABLE -> "Could not read ${entry.missingFields} from this line — excluded from import"
                 ValidationStatus.DUPLICATE -> "Duplicate entry found in DB with same party & amount"
                 ValidationStatus.TYPE_MISMATCH -> "Account type mismatch: Cash/Bank entries should be Receipt/Payment or Contra"
                 ValidationStatus.INVALID_AMOUNT -> "Invalid amount: Must be greater than zero"
@@ -1783,6 +1849,7 @@ fun DocumentExtractImportSection(
     val validCount = validatedLines.count { it.status == ValidationStatus.VALID }
     val duplicateCount = validatedLines.count { it.status == ValidationStatus.DUPLICATE }
     val mismatchCount = validatedLines.count { it.status == ValidationStatus.TYPE_MISMATCH }
+    val unreadableCount = validatedLines.count { it.status == ValidationStatus.UNPARSEABLE }
 
     Card(
         shape = RoundedCornerShape(24.dp),
@@ -1856,6 +1923,15 @@ fun DocumentExtractImportSection(
                         Text("⚠️ Duplicates: $duplicateCount", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color(0xFFD97706))
                         Text("⚡ Type Mismatches: $mismatchCount", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingRed)
                     }
+                    if (unreadableCount > 0) {
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "🚫 Unreadable rows (skipped): $unreadableCount",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AccountingRed
+                        )
+                    }
                 }
             }
 
@@ -1873,6 +1949,7 @@ fun DocumentExtractImportSection(
                             ValidationStatus.DUPLICATE -> Color(0xFFFEF3C7)
                             ValidationStatus.TYPE_MISMATCH -> Color(0xFFFEE2E2)
                             ValidationStatus.INVALID_AMOUNT -> Color(0xFFFEE2E2)
+                            ValidationStatus.UNPARSEABLE -> Color(0xFFFEE2E2)
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -1883,7 +1960,9 @@ fun DocumentExtractImportSection(
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Text(row.party, fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                                    // Neutral dash rather than a stand-in account name when the
+                                    // line yielded no party.
+                                    Text(row.party.ifBlank { "—" }, fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Surface(
                                         shape = RoundedCornerShape(6.dp),
@@ -1899,6 +1978,7 @@ fun DocumentExtractImportSection(
                                                 ValidationStatus.DUPLICATE -> "DUPLICATE"
                                                 ValidationStatus.TYPE_MISMATCH -> "MISMATCH"
                                                 ValidationStatus.INVALID_AMOUNT -> "INVALID"
+                                                ValidationStatus.UNPARSEABLE -> "UNREADABLE"
                                             },
                                             fontSize = 9.sp,
                                             fontWeight = FontWeight.Bold,
@@ -1911,10 +1991,20 @@ fun DocumentExtractImportSection(
                                         )
                                     }
                                 }
-                                Text("${row.date} • ${row.voucherType.name} • ${row.reason}", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(
+                                    text = listOf(row.date.ifBlank { "—" }, row.voucherType.name, row.reason).joinToString(" • "),
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text(IndianFormatter.formatRupee(row.amount), style = MonospaceTabularTextStyle, fontWeight = FontWeight.Bold)
+                            // A row whose amount could not be read shows a dash, not ₹0.00.
+                            Text(
+                                text = if (row.status == ValidationStatus.UNPARSEABLE && row.amount == 0.0) "—"
+                                else IndianFormatter.formatRupee(row.amount),
+                                style = MonospaceTabularTextStyle,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
                 }
@@ -1954,7 +2044,12 @@ fun DocumentExtractImportSection(
                         // Auto-fix mismatches (e.g. Convert Cash Sale to Receipt/Contra, skip duplicates)
                         var fixedCount = 0
                         validatedLines.forEach { entry ->
-                            if (entry.status != ValidationStatus.DUPLICATE && entry.amount > 0) {
+                            // Unreadable rows are skipped here too: "Auto-Fix" must not invent the
+                            // date, party or amount the source line never supplied.
+                            if (entry.status != ValidationStatus.DUPLICATE &&
+                                entry.status != ValidationStatus.UNPARSEABLE &&
+                                entry.amount > 0
+                            ) {
                                 val fixedType = if (entry.status == ValidationStatus.TYPE_MISMATCH) {
                                     VoucherType.RECEIPT
                                 } else entry.voucherType
@@ -1996,14 +2091,19 @@ data class ParsedEntryRow(
     val date: String,
     val party: String,
     val voucherType: VoucherType,
-    val amount: Double
+    val amount: Double,
+    /** Comma-separated names of the fields the source line did not yield. Empty when the
+     *  line parsed completely. A non-empty value marks the row UNPARSEABLE, which excludes
+     *  it from every import path instead of filling the gaps with invented values. */
+    val missingFields: String = ""
 )
 
 enum class ValidationStatus {
     VALID,
     DUPLICATE,
     TYPE_MISMATCH,
-    INVALID_AMOUNT
+    INVALID_AMOUNT,
+    UNPARSEABLE
 }
 
 data class ValidatedParsedRow(
@@ -2066,6 +2166,7 @@ fun QuickActionButton(
 
 @Composable
 fun IncomeExpenseChartCard(
+    monthlyPnlRows: List<MonthlyPnlRow>,
     totalIncome: Double,
     totalExpense: Double
 ) {
@@ -2081,6 +2182,11 @@ fun IncomeExpenseChartCard(
                 fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Posted journal entries, current financial year",
+                fontSize = 11.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             Spacer(modifier = Modifier.height(12.dp))
             Row(
@@ -2100,75 +2206,121 @@ fun IncomeExpenseChartCard(
             }
             Spacer(modifier = Modifier.height(16.dp))
 
-            val months = listOf("Apr", "May", "Jun", "Jul", "Aug", "Current")
-            val maxVal = Math.max(Math.max(totalIncome, totalExpense), 10000.0)
-            val monthIncomeRatios = listOf(0.45, 0.60, 0.52, 0.75, 0.85, 1.0)
-            val monthExpenseRatios = listOf(0.35, 0.50, 0.40, 0.65, 0.70, if (totalIncome > 0) totalExpense / totalIncome else 0.8)
+            // Real monthly series, bucketed from posted journal entries (viewModel.monthlyPnlState).
+            // This chart used to invent its own history: a fixed axis of "Apr, May, Jun, Jul,
+            // Aug, Current" and two hardcoded ratio lists (0.45/0.60/0.52/0.75/0.85/1.0 for
+            // income, 0.35/0.50/0.40/0.65/0.70/... for expense) that smeared the single real
+            // period total across six fabricated buckets. Every user saw the same rising
+            // "trend" no matter what their books said, including on a brand-new install.
+            val monthlySeries = remember(monthlyPnlRows) {
+                val revenueByMonth = monthlyPnlRows
+                    .filter { it.category == LedgerCategory.REVENUE }
+                    .groupBy { it.monthKey }
+                    .mapValues { (_, rows) -> rows.sumOf { it.totalCredit - it.totalDebit } }
+                val expenseByMonth = monthlyPnlRows
+                    .filter { it.category == LedgerCategory.EXPENSE }
+                    .groupBy { it.monthKey }
+                    .mapValues { (_, rows) -> rows.sumOf { it.totalDebit - it.totalCredit } }
 
-            Box(modifier = Modifier.fillMaxWidth().height(150.dp)) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val canvasWidth = size.width
-                    val canvasHeight = size.height
-                    val bottomPadding = 60f
-                    val topPadding = 10f
-                    val chartHeight = canvasHeight - bottomPadding - topPadding
-                    val count = months.size
-                    val sectionWidth = canvasWidth / count
-                    val barWidth = (sectionWidth * 0.32f).coerceAtMost(22f)
+                val keyFmt = java.text.SimpleDateFormat("yyyy-MM", java.util.Locale.ENGLISH)
+                val labelFmt = java.text.SimpleDateFormat("MMM", java.util.Locale.ENGLISH)
 
-                    for (i in 0..3) {
-                        val y = topPadding + (chartHeight / 3f) * i
-                        drawLine(
-                            color = Color.LightGray.copy(alpha = 0.25f),
-                            start = Offset(0f, y),
-                            end = Offset(canvasWidth, y),
-                            strokeWidth = 1f
-                        )
+                (revenueByMonth.keys + expenseByMonth.keys).sorted().map { key ->
+                    val label = try {
+                        keyFmt.parse(key)?.let { labelFmt.format(it) } ?: key
+                    } catch (e: Exception) {
+                        key
                     }
-
-                    drawLine(
-                        color = Color.Gray.copy(alpha = 0.4f),
-                        start = Offset(0f, canvasHeight - bottomPadding),
-                        end = Offset(canvasWidth, canvasHeight - bottomPadding),
-                        strokeWidth = 2f
-                    )
-
-                    for (i in 0 until count) {
-                        val centerX = sectionWidth * i + (sectionWidth / 2f)
-                        val incHeight = (chartHeight * (monthIncomeRatios[i] * (totalIncome / maxVal))).toFloat().coerceAtLeast(12f)
-                        val expHeight = (chartHeight * (monthExpenseRatios[i] * (totalExpense / maxVal))).toFloat().coerceAtLeast(8f)
-
-                        val incLeft = centerX - barWidth - 2f
-                        val expLeft = centerX + 2f
-                        val incTop = canvasHeight - bottomPadding - incHeight
-                        val expTop = canvasHeight - bottomPadding - expHeight
-
-                        drawRoundRect(
-                            color = AccountingGreen,
-                            topLeft = Offset(incLeft, incTop),
-                            size = Size(barWidth, incHeight),
-                            cornerRadius = CornerRadius(6f, 6f)
-                        )
-                        drawRoundRect(
-                            color = AccountingRed,
-                            topLeft = Offset(expLeft, expTop),
-                            size = Size(barWidth, expHeight),
-                            cornerRadius = CornerRadius(6f, 6f)
-                        )
-                    }
+                    Triple(label, revenueByMonth[key] ?: 0.0, expenseByMonth[key] ?: 0.0)
                 }
+            }
 
-                Row(
-                    modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
-                    horizontalArrangement = Arrangement.SpaceAround
+            if (monthlySeries.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxWidth().height(150.dp),
+                    contentAlignment = Alignment.Center
                 ) {
-                    months.forEach { month ->
-                        Text(
-                            text = month,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                    Text(
+                        text = "No monthly activity recorded yet.\nPost a sale or an expense to see the trend.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            } else {
+                val maxVal = monthlySeries
+                    .maxOf { Math.max(it.second, it.third) }
+                    .coerceAtLeast(1.0)
+
+                Box(modifier = Modifier.fillMaxWidth().height(150.dp)) {
+                    Canvas(modifier = Modifier.fillMaxSize()) {
+                        val canvasWidth = size.width
+                        val canvasHeight = size.height
+                        val bottomPadding = 60f
+                        val topPadding = 10f
+                        val chartHeight = canvasHeight - bottomPadding - topPadding
+                        val count = monthlySeries.size
+                        val sectionWidth = canvasWidth / count
+                        val barWidth = (sectionWidth * 0.32f).coerceAtMost(22f)
+
+                        for (i in 0..3) {
+                            val y = topPadding + (chartHeight / 3f) * i
+                            drawLine(
+                                color = Color.LightGray.copy(alpha = 0.25f),
+                                start = Offset(0f, y),
+                                end = Offset(canvasWidth, y),
+                                strokeWidth = 1f
+                            )
+                        }
+
+                        drawLine(
+                            color = Color.Gray.copy(alpha = 0.4f),
+                            start = Offset(0f, canvasHeight - bottomPadding),
+                            end = Offset(canvasWidth, canvasHeight - bottomPadding),
+                            strokeWidth = 2f
                         )
+
+                        monthlySeries.forEachIndexed { i, (_, income, expense) ->
+                            val centerX = sectionWidth * i + (sectionWidth / 2f)
+                            val incHeight = (chartHeight * (income / maxVal)).toFloat().coerceAtLeast(0f)
+                            val expHeight = (chartHeight * (expense / maxVal)).toFloat().coerceAtLeast(0f)
+
+                            val incLeft = centerX - barWidth - 2f
+                            val expLeft = centerX + 2f
+
+                            // A month with no activity draws no bar, rather than a minimum-height
+                            // stub that would read as real turnover.
+                            if (incHeight > 0f) {
+                                drawRoundRect(
+                                    color = AccountingGreen,
+                                    topLeft = Offset(incLeft, canvasHeight - bottomPadding - incHeight),
+                                    size = Size(barWidth, incHeight),
+                                    cornerRadius = CornerRadius(6f, 6f)
+                                )
+                            }
+                            if (expHeight > 0f) {
+                                drawRoundRect(
+                                    color = AccountingRed,
+                                    topLeft = Offset(expLeft, canvasHeight - bottomPadding - expHeight),
+                                    size = Size(barWidth, expHeight),
+                                    cornerRadius = CornerRadius(6f, 6f)
+                                )
+                            }
+                        }
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth().align(Alignment.BottomCenter),
+                        horizontalArrangement = Arrangement.SpaceAround
+                    ) {
+                        monthlySeries.forEach { (label, _, _) ->
+                            Text(
+                                text = label,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 }
             }
