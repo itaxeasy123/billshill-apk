@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.dao.LedgerWithBalance
 import com.example.data.model.UserEntity
 import com.example.data.model.VoucherEntity
+import com.example.data.model.VoucherType
 import com.example.ui.AccountingViewModel
 import com.example.ui.theme.AccountingGreen
 import com.example.ui.theme.AccountingRed
@@ -47,6 +48,8 @@ fun HierarchicalFinancialStatement(
     user: UserEntity,
     vouchers: List<VoucherEntity>,
     trialBalance: List<LedgerWithBalance>,
+    /** (inflow, outflow, net) actually moved through cash and bank in the period. */
+    cashFlow: Triple<Double, Double, Double>,
     viewModel: AccountingViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -146,6 +149,7 @@ fun HierarchicalFinancialStatement(
             // derive from real ledger balances.
             RenderCashFlowView(
                 vouchers = vouchers,
+                cashFlow = cashFlow,
                 onSelectCategory = { title, matchedVouchers ->
                     breakdownTitle = title
                     selectedVouchersForBreakdown = matchedVouchers
@@ -158,14 +162,21 @@ fun HierarchicalFinancialStatement(
 @Composable
 private fun RenderCashFlowView(
     vouchers: List<VoucherEntity>,
+    cashFlow: Triple<Double, Double, Double>,
     onSelectCategory: (String, List<VoucherEntity>) -> Unit
 ) {
-    val salesVouchers = vouchers.filter { it.voucherType.name.contains("SALE", true) || it.voucherType.name.contains("RECEIPT", true) }
-    val purchaseVouchers = vouchers.filter { it.voucherType.name.contains("PURCHASE", true) || it.voucherType.name.contains("PAYMENT", true) }
+    // Real movement through the cash and bank ledgers, not a guess from voucher types.
+    //
+    // This classified by substring, so "SALES_RETURN" matched "SALE" and a refund counted
+    // as an INFLOW, while a credit sale and the receipt that settled it were BOTH counted
+    // — the same rupee twice. Cash flow is not a property of a voucher's type.
+    val salesInflow = cashFlow.first
+    val purchaseOutflow = cashFlow.second
+    val netCash = cashFlow.third
 
-    val salesInflow = salesVouchers.sumOf { it.totalAmount }
-    val purchaseOutflow = purchaseVouchers.sumOf { it.totalAmount }
-    val netCash = salesInflow - purchaseOutflow
+    // Kept only to populate the drill-down list, never to compute the totals.
+    val salesVouchers = vouchers.filter { it.voucherType == VoucherType.SALES || it.voucherType == VoucherType.RECEIPT }
+    val purchaseVouchers = vouchers.filter { it.voucherType == VoucherType.PURCHASE || it.voucherType == VoucherType.PAYMENT }
 
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         StatementGroupHeader("Cash Inflows (Operating / Sales / Receipts)", salesInflow, false, { onSelectCategory("Cash Inflows", salesVouchers) })

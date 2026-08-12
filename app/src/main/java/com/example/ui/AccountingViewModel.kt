@@ -747,6 +747,18 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     val negativeStockItemsState: StateFlow<List<InventoryItemEntity>> = repository.negativeStockItemsFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** QRMP or MONTHLY. Nothing could set this, so the QRMP path was unreachable. */
+    fun setFilingScheme(scheme: String) {
+        viewModelScope.launch {
+            val current = userState.value ?: return@launch
+            repository.updateUserProfile(current.copy(filingScheme = scheme))
+            _messageEvent.emit(
+                if (scheme == "QRMP") "Filing scheme set to QRMP — quarterly GSTR-1, monthly PMT-06."
+                else "Filing scheme set to monthly."
+            )
+        }
+    }
+
     fun addInventoryItem(
         name: String,
         unit: String,

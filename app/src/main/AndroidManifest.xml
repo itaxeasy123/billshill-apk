@@ -8,7 +8,6 @@
     <!-- CAMERA removed: there is no camera code anywhere in this app. The QR
          "scanner" is a manual entry form, and requesting camera access for it would be
          asking for a permission the app cannot use. -->
-    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
     <application
         android:allowBackup="true"

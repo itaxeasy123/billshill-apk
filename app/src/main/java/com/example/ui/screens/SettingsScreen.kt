@@ -973,6 +973,35 @@ fun SettingsScreen(
 
                     Spacer(modifier = Modifier.height(12.dp))
 
+                    // Drives the GST due dates. Without it the QRMP path was unreachable
+                    // and every filer was shown the monthly 11th/20th.
+                    Text("GST Filing Scheme:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf(
+                            "MONTHLY" to "Monthly",
+                            "QRMP" to "QRMP (quarterly)"
+                        ).forEach { (scheme, label) ->
+                            FilterChip(
+                                selected = (user.filingScheme.ifBlank { "MONTHLY" }) == scheme,
+                                onClick = { viewModel.setFilingScheme(scheme) },
+                                label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                colors = FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = RoyalPurplePrimary,
+                                    selectedLabelColor = Color.White
+                                ),
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    }
+                    Text(
+                        "QRMP is available up to Rs 5 crore turnover: GSTR-1 quarterly by the 13th, payment by the 25th.",
+                        fontSize = 10.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     Text("Backup Interval:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
                     Row(

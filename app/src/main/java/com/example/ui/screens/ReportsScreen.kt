@@ -105,6 +105,7 @@ fun ReportsScreen(
     val totalPurchases by viewModel.totalPurchasesState.collectAsState()
     val inventoryItems by viewModel.inventoryState.collectAsState()
     val negativeStockItems by viewModel.negativeStockItemsState.collectAsState()
+    val cashFlow by viewModel.cashFlowState.collectAsState()
     // Party ledgers carry the buyer's GSTIN — the only place it is captured today — and
     // that is what decides B2B vs B2C.
     val allLedgersForGst by viewModel.ledgersState.collectAsState()
@@ -946,6 +947,7 @@ fun ReportsScreen(
                             user = user,
                             vouchers = allVouchers,
                             trialBalance = trialBalance,
+                            cashFlow = cashFlow,
                             viewModel = viewModel
                         )
                     }
@@ -1711,6 +1713,10 @@ fun ReportsScreen(
                                     .deriveGstRate(imported.amount, imported.gstAmount)
                                     .let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() },
                                 isInterstate = imported.isInterstate,
+                                // Imports previously resolved to Bank unless the party name
+                                // happened to contain "cash". Pinned so a re-import does not
+                                // silently move the whole balance into Cash-in-Hand.
+                                paymentMode = "BANK",
                                 narration = "${imported.narration} [Source: ${imported.source}]"
                             )
                         }

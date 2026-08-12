@@ -2070,7 +2070,8 @@ fun DocumentExtractImportSection(
                                 amountText = entry.amount.toString(),
                                 gstRateText = "18",
                                 isInterstate = false,
-                                narration = "Validated Import from $documentType (${entry.date})"
+                                narration = "Validated Import from $documentType (${entry.date})",
+                                paymentMode = "BANK",
                             )
                         }
                         importedSuccessMessage = "Successfully imported ${validRows.size} validated non-duplicate entries!"
@@ -2102,7 +2103,8 @@ fun DocumentExtractImportSection(
                                     amountText = entry.amount.toString(),
                                     gstRateText = "18",
                                     isInterstate = false,
-                                    narration = "Auto-Fixed Import from $documentType (${entry.date})"
+                                    narration = "Auto-Fixed Import from $documentType (${entry.date})",
+                                paymentMode = "BANK",
                                 )
                                 fixedCount++
                             }
@@ -2446,7 +2448,7 @@ fun calculateGstDeadlines(
     deadlines.add(
         GstDeadline(
             name = "GSTR-1 (Outward Sales)",
-            period = if (currentDay <= 11) prevMonthName else monthFormat.format(now.time),
+            period = if (currentDay <= gstr1DueDay) prevMonthName else monthFormat.format(now.time),
             dueDateString = gstr1DueDateStr,
             daysLeft = daysGstr1,
             description = "Filing of outward sales invoices & GST liability."
@@ -2468,8 +2470,8 @@ fun calculateGstDeadlines(
 
     deadlines.add(
         GstDeadline(
-            name = "GSTR-3B (Summary Return)",
-            period = if (currentDay <= 20) prevMonthName else monthFormat.format(now.time),
+            name = if (isQrmp) "PMT-06 (Monthly Payment)" else "GSTR-3B (Summary Return)",
+            period = if (currentDay <= gstr3bDueDay) prevMonthName else monthFormat.format(now.time),
             dueDateString = gstr3bDueDateStr,
             daysLeft = daysGstr3b,
             description = "Monthly summary return and net tax payment after ITC."

@@ -680,6 +680,10 @@ interface AccountingDao {
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
         WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+          -- A Contra debits one of these and credits the other, so counting it would
+          -- inflate both inflow and outflow by the same amount. It moves money between
+          -- two accounts the business already holds; no cash enters or leaves.
+          AND v.voucherType != 'CONTRA'
         """
     )
     fun getCashInflowFlow(fromMillis: Long, toMillis: Long): Flow<Double>
@@ -691,6 +695,7 @@ interface AccountingDao {
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
         WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+          AND v.voucherType != 'CONTRA'
         """
     )
     fun getCashOutflowFlow(fromMillis: Long, toMillis: Long): Flow<Double>

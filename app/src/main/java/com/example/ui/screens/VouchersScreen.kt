@@ -65,7 +65,10 @@ fun VouchersScreen(
     user: UserEntity,
     initialVoucherType: VoucherType = VoucherType.Sale
 ) {
-    val visibleVoucherTypes = remember { VoucherType.values().filter { it != VoucherType.JOURNAL } }
+    val visibleVoucherTypes = remember { // STOCK_OPENING is posted automatically when an item is created with a
+    // quantity on hand. Hand-writing one has no item attached, so it would credit
+    // Suspense and add no stock — putting the Balance Sheet out by its own amount.
+    VoucherType.values().filter { it != VoucherType.JOURNAL && it != VoucherType.STOCK_OPENING } }
     val initialType = if (initialVoucherType == VoucherType.JOURNAL) VoucherType.SALES else initialVoucherType
     var selectedVoucherType by remember(initialType) { mutableStateOf(initialType) }
     var partyName by remember { mutableStateOf("") }

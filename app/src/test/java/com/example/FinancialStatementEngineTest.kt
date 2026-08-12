@@ -89,6 +89,7 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = 0.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = pl.nettProfit, inventoryEnabled = false
         )
 
@@ -104,7 +105,7 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = closingStock,
-            currentPeriodProfit = pl.nettProfit, inventoryEnabled = true
+            openingStockValue = 0.0, currentPeriodProfit = pl.nettProfit, inventoryEnabled = true
         )
 
         // Closing stock lands on both faces — asset on one, profit via the P&L on the other.
@@ -124,6 +125,7 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = difference, journalImbalance = 0.0, closingStockValue = 0.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = pl.nettProfit, inventoryEnabled = false
         )
 
@@ -144,6 +146,7 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = difference, journalImbalance = 0.0, closingStockValue = 0.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = pl.nettProfit, inventoryEnabled = false
         )
         assertEquals(bs.liabilitiesTotal, bs.assetsTotal, tol)
@@ -156,6 +159,7 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = 25_000.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = pl.nettProfit, inventoryEnabled = true
         )
         assertEquals(pl.nettProfit, bs.pnlCurrent, tol)
@@ -198,6 +202,7 @@ class FinancialStatementEngineTest {
         val withInventory = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = 25_000.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = 0.0, inventoryEnabled = true
         )
         assertTrue(withInventory.assets.none { it.group == TallyGroup.STOCK_IN_HAND })
@@ -205,6 +210,7 @@ class FinancialStatementEngineTest {
         val withoutInventory = FinancialStatementEngine.balanceSheet(
             balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = 0.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = 0.0, inventoryEnabled = false
         )
         assertTrue(withoutInventory.assets.any { it.group == TallyGroup.STOCK_IN_HAND })
@@ -215,7 +221,7 @@ class FinancialStatementEngineTest {
     @Test
     fun `an empty book reports no data rather than a grid of zeros`() {
         val bs = FinancialStatementEngine.balanceSheet(
-            emptyList(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = true
+            emptyList(), 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = true
         )
         assertFalse(bs.hasAnyData)
         assertTrue(bs.liabilities.isEmpty())
@@ -234,7 +240,7 @@ class FinancialStatementEngineTest {
             ledger("Capital Account", "Equity", LedgerCategory.EQUITY, credit = 1000.0)
         )
         val bs = FinancialStatementEngine.balanceSheet(
-            book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = false
+            book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = false
         )
         val names = bs.assets.flatMap { it.lines }.map { it.label }
         assertTrue("Cash in Hand" in names)
@@ -272,7 +278,7 @@ class FinancialStatementEngineTest {
             ledger("Capital Account", "Equity", LedgerCategory.EQUITY, credit = 5_000.0)
         )
         val bs = FinancialStatementEngine.balanceSheet(
-            book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = false
+            book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, inventoryEnabled = false
         )
         assertEquals(5_000.0, bs.assetsTotal, tol)
         assertEquals(bs.liabilitiesTotal, bs.assetsTotal, tol)
@@ -326,7 +332,7 @@ class FinancialStatementEngineTest {
         assertEquals(-30_000.0, pl.nettProfit, tol)
 
         val bs = FinancialStatementEngine.balanceSheet(
-            book, 0.0, 0.0, 0.0, 0.0, 0.0, pl.nettProfit, inventoryEnabled = false
+            book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, pl.nettProfit, inventoryEnabled = false
         )
         assertEquals(bs.liabilitiesTotal, bs.assetsTotal, tol)
     }
@@ -335,7 +341,7 @@ class FinancialStatementEngineTest {
     fun `journal imbalance is reported rather than hidden`() {
         val bs = FinancialStatementEngine.balanceSheet(
             balancedBook(), 0.0, 0.0, 0.0, journalImbalance = 250.0,
-            closingStockValue = 0.0, currentPeriodProfit = 0.0, inventoryEnabled = false
+            closingStockValue = 0.0, openingStockValue = 0.0, currentPeriodProfit = 0.0, inventoryEnabled = false
         )
         assertEquals(250.0, bs.journalImbalance, tol)
     }
@@ -345,57 +351,93 @@ class FinancialStatementEngineTest {
         val bs = FinancialStatementEngine.balanceSheet(
             balancedBook(), priorProfit = 40_000.0, nominalOpeningBalance = 15_000.0,
             openingDifference = 0.0, journalImbalance = 0.0, closingStockValue = 0.0,
+            openingStockValue = 0.0,
             currentPeriodProfit = 0.0, inventoryEnabled = false
         )
         assertEquals(55_000.0, bs.pnlOpening, tol)
     }
 
-    // ---------- stock cost basis ----------
+    // ---------- stock: the invariant that actually matters ----------
 
     @Test
-    fun `stock roll-back uses the cost frozen on each line, not the live average`() {
-        // Opening 100 @ Rs 50, purchase 20 @ Rs 60, sale of 30 at the resulting average.
-        // Valuing history at the item's CURRENT average retroactively revalued every past
-        // movement, so the derived opening stock drifted from the figure actually posted
-        // and the Balance Sheet went out by the difference.
-        val openingQty = 100.0
-        val openingCost = 50.0
-        val postedOpeningValue = openingQty * openingCost          // 5,000.00
-
-        val qtyAfterPurchase = openingQty + 20
-        val avgAfterPurchase = (openingQty * openingCost + 20 * 60.0) / qtyAfterPurchase
-        val qtyAfterSale = qtyAfterPurchase - 30
-        val currentValue = qtyAfterSale * avgAfterPurchase          // 4,650.00
-
-        // Frozen costs: purchase at 60, sale at the average that applied when it happened.
-        val movementFrozen = 20 * 60.0 - 30 * avgAfterPurchase
-        assertEquals(postedOpeningValue, currentValue - movementFrozen, 0.01)
-
-        // The live-average form drifts, and the drift is exactly what unbalanced the sheet.
-        val movementLiveAverage = 20 * avgAfterPurchase - 30 * avgAfterPurchase
-        val driftedOpening = currentValue - movementLiveAverage
-        assertTrue(
-            "live-average roll-back must drift from the posted figure",
-            abs(driftedOpening - postedOpeningValue) > 100.0
+    fun `the sheet balances for a period that does not start at inception`() {
+        // The Stock-in-Hand LEDGER is written once by the opening posting and never moves
+        // again, while the DERIVED stock value moves with every transaction. Viewing a
+        // single month after a year of trading therefore reported the two faces apart by
+        // exactly the stock movement that preceded the period — on an honest book.
+        //
+        // Opening 100 @ Rs 50 posted (ledger 5,000); by 31 Jul stock is worth 4,650.
+        val book = listOf(
+            ledger("Anand Traders", "Sundry Debtors", LedgerCategory.ASSET, debit = 3_000.0),
+            ledger("Sharma Traders", "Sundry Creditors", LedgerCategory.LIABILITY, credit = 1_200.0),
+            ledger("Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET, debit = 5_000.0),
+            ledger("Difference in Opening Balances", "Suspense A/c", LedgerCategory.LIABILITY, credit = 5_000.0),
+            ledger("Sales Account", "Sales Accounts", LedgerCategory.REVENUE, credit = 3_000.0),
+            ledger("Purchase Account", "Purchase Accounts", LedgerCategory.EXPENSE, debit = 1_200.0)
         )
+        // August-only view: nothing posted in the period, everything is prior.
+        val bs = FinancialStatementEngine.balanceSheet(
+            balances = book,
+            priorProfit = 1_800.0,          // 3,000 sales - 1,200 purchases, all before August
+            nominalOpeningBalance = 0.0,
+            openingDifference = 0.0,
+            journalImbalance = 0.0,
+            closingStockValue = 4_650.0,
+            openingStockValue = 4_650.0,    // stock as at 31 July
+            currentPeriodProfit = 0.0,
+            inventoryEnabled = true
+        )
+        assertEquals(
+            "a mid-year period must still balance",
+            bs.liabilitiesTotal, bs.assetsTotal, tol
+        )
+        assertTrue(bs.balances)
     }
 
     @Test
-    fun `periodic trading account yields the expected gross profit and COGS`() {
-        // Opening 5,000 + purchases 1,200 - closing 4,650 = COGS 1,550 against sales
-        // 3,000, so gross profit is 1,450 — the periodic model's own definition of COGS,
-        // which is why no separate COGS posting is needed.
-        val openingStock = 5_000.0
-        val purchases = 1_200.0
-        val closingStock = 4_650.0
-        val sales = 3_000.0
+    fun `the sheet balances for the full year the stock was opened in`() {
+        val book = listOf(
+            ledger("Anand Traders", "Sundry Debtors", LedgerCategory.ASSET, debit = 3_000.0),
+            ledger("Sharma Traders", "Sundry Creditors", LedgerCategory.LIABILITY, credit = 1_200.0),
+            ledger("Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET, debit = 5_000.0),
+            ledger("Difference in Opening Balances", "Suspense A/c", LedgerCategory.LIABILITY, credit = 5_000.0),
+            ledger("Sales Account", "Sales Accounts", LedgerCategory.REVENUE, credit = 3_000.0),
+            ledger("Purchase Account", "Purchase Accounts", LedgerCategory.EXPENSE, debit = 1_200.0)
+        )
+        val pl = FinancialStatementEngine.profitAndLoss(
+            nominal(book), openingStockValue = 5_000.0, closingStockValue = 4_650.0, inventoryEnabled = true
+        )
+        assertEquals("gross profit", 1_450.0, pl.grossProfit, tol)
+        assertEquals("nett profit", 1_450.0, pl.nettProfit, tol)
 
-        val grossProfit = (sales + closingStock) - (openingStock + purchases)
-        val cogs = openingStock + purchases - closingStock
+        val bs = FinancialStatementEngine.balanceSheet(
+            balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
+            openingDifference = 0.0, journalImbalance = 0.0,
+            closingStockValue = 4_650.0, openingStockValue = 5_000.0,
+            currentPeriodProfit = pl.nettProfit, inventoryEnabled = true
+        )
+        assertEquals(7_650.0, bs.assetsTotal, tol)
+        assertEquals(7_650.0, bs.liabilitiesTotal, tol)
+        // Nothing is plugged: the opening-balance line stays at zero.
+        assertEquals(0.0, bs.openingDifference, tol)
+    }
 
-        assertEquals(1_450.0, grossProfit, 0.01)
-        assertEquals(1_550.0, cogs, 0.01)
-        assertEquals(sales - cogs, grossProfit, 0.01)
+    @Test
+    fun `the stock ledger is not double counted against the derived closing stock`() {
+        val book = listOf(
+            ledger("Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET, debit = 5_000.0),
+            ledger("Difference in Opening Balances", "Suspense A/c", LedgerCategory.LIABILITY, credit = 5_000.0)
+        )
+        val bs = FinancialStatementEngine.balanceSheet(
+            balances = book, priorProfit = 0.0, nominalOpeningBalance = 0.0,
+            openingDifference = 0.0, journalImbalance = 0.0,
+            closingStockValue = 5_000.0, openingStockValue = 5_000.0,
+            currentPeriodProfit = 0.0, inventoryEnabled = true
+        )
+        // Stock appears once, as the derived figure — never as both.
+        assertTrue(bs.assets.none { it.group == TallyGroup.STOCK_IN_HAND })
+        assertEquals(5_000.0, bs.assetsTotal, tol)
+        assertEquals(5_000.0, bs.liabilitiesTotal, tol)
     }
 
     @Test
@@ -412,7 +454,7 @@ class FinancialStatementEngineTest {
             )
             val pl = FinancialStatementEngine.profitAndLoss(nominal(book), 0.0, 0.0, inventoryEnabled = false)
             val bs = FinancialStatementEngine.balanceSheet(
-                book, 0.0, 0.0, 0.0, 0.0, 0.0, pl.nettProfit, inventoryEnabled = false
+                book, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, pl.nettProfit, inventoryEnabled = false
             )
             assertTrue(
                 "unbalanced: assets=${bs.assetsTotal} liabilities=${bs.liabilitiesTotal}",

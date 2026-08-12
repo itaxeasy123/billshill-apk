@@ -184,15 +184,19 @@ class AccountingRepository(
                 dao.getOpeningBalanceDifferenceFlow(),
                 dao.getJournalImbalanceFlow(asOnMillis)
             ) { openingDiff, imbalance -> openingDiff to imbalance },
-            stockValueAsOnFlow(asOnMillis)
-        ) { balances, pnl, priors, checks, closingStock ->
+            combine(
+                stockValueAsOnFlow(asOnMillis),
+                stockValueAsOnFlow(fromMillis - 1)
+            ) { closing, opening -> closing to opening }
+        ) { balances, pnl, priors, checks, stock ->
             FinancialStatementEngine.balanceSheet(
                 balances = balances,
                 priorProfit = priors.first,
                 nominalOpeningBalance = priors.second,
                 openingDifference = checks.first,
                 journalImbalance = checks.second,
-                closingStockValue = closingStock,
+                closingStockValue = stock.first,
+                openingStockValue = if (inventoryEnabled) stock.second else 0.0,
                 currentPeriodProfit = pnl.nettProfit,
                 inventoryEnabled = inventoryEnabled
             )
@@ -493,7 +497,8 @@ class AccountingRepository(
                                 voucherId = voucherId,
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
-                                rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Guarded: a quantity of 0 wrote Infinity into voucher_items.rate.
+                                rate = if (itemRate > 0) itemRate else if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 // Cost basis frozen at posting time, so history is not revalued later.
                                 costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
@@ -535,7 +540,8 @@ class AccountingRepository(
                                 voucherId = voucherId,
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
-                                rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Guarded: a quantity of 0 wrote Infinity into voucher_items.rate.
+                                rate = if (itemRate > 0) itemRate else if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 // Cost basis frozen at posting time, so history is not revalued later.
                                 costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
@@ -620,7 +626,8 @@ class AccountingRepository(
                                 voucherId = voucherId,
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
-                                rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Guarded: a quantity of 0 wrote Infinity into voucher_items.rate.
+                                rate = if (itemRate > 0) itemRate else if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 // This receipt's own unit cost, frozen on the line.
                                 costRate = if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 amount = taxableValue,
@@ -670,7 +677,8 @@ class AccountingRepository(
                                 voucherId = voucherId,
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
-                                rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Guarded: a quantity of 0 wrote Infinity into voucher_items.rate.
+                                rate = if (itemRate > 0) itemRate else if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 // Cost basis frozen at posting time, so history is not revalued later.
                                 costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
@@ -780,8 +788,15 @@ class AccountingRepository(
         val sgstAmount = gstBreakdown.sgstAmount
         val igstAmount = gstBreakdown.igstAmount
 
-        // 2. Ensure Party Ledger exists, or AUTO-CREATE
-        var partyLedger = getOrCreatePartyLedger(partyName, voucherType)
+        // 2. Ensure Party Ledger exists, or AUTO-CREATE.
+        //    STOCK_OPENING has no counterparty — it posts to Stock-in-Hand and Suspense
+        //    directly — and creating one left a junk zero-balance ledger named "Opening
+        //    Stock" in the Chart of Accounts and the party autocomplete.
+        var partyLedger = if (voucherType == VoucherType.STOCK_OPENING) {
+            getOrCreateSystemLedger(SYSTEM_LEDGER_STOCK, "Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET)
+        } else {
+            getOrCreatePartyLedger(partyName, voucherType)
+        }
         val cleanedGstin = partyGstin.trim()
         if (cleanedGstin.isNotBlank() && partyLedger.gstin != cleanedGstin) {
             partyLedger = partyLedger.copy(gstin = cleanedGstin)
@@ -999,7 +1014,11 @@ class AccountingRepository(
         // A purchase reversal must unwind the weighted-average cost it rolled forward,
         // not just the quantity — otherwise the inflated average stays behind.
         if (voucher.voucherType == VoucherType.PURCHASE) {
-            snapshot.items.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.rate) }
+            // costRate, not rate: `rate` is the SELLING price on outward lines and can be
+            // supplied independently on a purchase, so unwinding at it writes the average
+            // down by the margin. 100 @ 50 plus 20 received at cost 60 but rate 70 would
+            // unwind to Rs 48.00 against a true Rs 50.00.
+            snapshot.items.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.costRate) }
         }
         dao.deleteVoucherAtomic(
             voucherId = voucherId,
@@ -1145,10 +1164,18 @@ class AccountingRepository(
         // the type, and reversing with the new one would move stock the wrong way.
         // Same on amendment: unwind cost as well as quantity for a purchase.
         if (existing.voucherType == VoucherType.PURCHASE) {
-            oldItems.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.rate) }
+            oldItems.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.costRate) }
         }
-        val reversals = if (existing.voucherType == VoucherType.PURCHASE) emptyList()
-        else oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
+        val reversals = when (existing.voucherType) {
+            VoucherType.PURCHASE -> emptyList()
+            // STOCK_OPENING is the one branch that writes a voucher_items row WITHOUT
+            // moving stock — the quantity is set directly on the item at creation. So
+            // reversing it here removed the opening quantity and the re-post added
+            // nothing back: opening an "Opening Stock" card and tapping Update with no
+            // changes silently zeroed the item's stock and unbalanced the sheet.
+            VoucherType.STOCK_OPENING -> emptyList()
+            else -> oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
+        }
 
         inTransaction {
         dao.clearVoucherChildrenAtomic(

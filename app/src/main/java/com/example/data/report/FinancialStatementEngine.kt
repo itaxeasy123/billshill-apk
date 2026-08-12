@@ -82,6 +82,8 @@ object FinancialStatementEngine {
         openingDifference: Double,
         journalImbalance: Double,
         closingStockValue: Double,
+        /** Stock value at the START of the period, i.e. the P&L's opening stock. */
+        openingStockValue: Double,
         currentPeriodProfit: Double,
         inventoryEnabled: Boolean
     ): BalanceSheet {
@@ -100,7 +102,25 @@ object FinancialStatementEngine {
         val liabilities = buildSide(visible, StatementSide.LIABILITIES) { it.totalCredit - it.totalDebit }
         val assets = buildSide(visible, StatementSide.ASSETS) { it.totalDebit - it.totalCredit }
 
-        val pnlOpening = priorProfit + nominalOpeningBalance
+        // The stock adjustment belonging to everything BEFORE this period.
+        //
+        // The Stock-in-Hand LEDGER is written once by the opening-stock posting and never
+        // moves again — sales and purchases post to Sales A/c and Purchase A/c, never to
+        // stock. The DERIVED stock value moves with every transaction. So for any period
+        // that does not start at the book's inception, the two diverge and the sheet was
+        // out by exactly the stock movement that happened before the period began: viewing
+        // August alone, after a year with Rs 350 of net stock movement, reported the two
+        // faces Rs 350 apart and tripped the imbalance banner on an honest book.
+        //
+        // Carrying (stock at period start − stock ledger) into retained earnings closes
+        // it, because that movement IS prior-period profit that never reached the ledger.
+        val stockLedgerBalance = classified
+            .filter { (_, c) -> c.first == TallyGroup.STOCK_IN_HAND }
+            .sumOf { (row, _) -> row.totalDebit - row.totalCredit }
+        val priorStockAdjustment =
+            if (inventoryEnabled) openingStockValue - stockLedgerBalance else 0.0
+
+        val pnlOpening = priorProfit + nominalOpeningBalance + priorStockAdjustment
 
         var liabilitiesTotal = liabilities.sumOf { it.total } + pnlOpening + currentPeriodProfit
         var assetsTotal = assets.sumOf { it.total }
