@@ -108,6 +108,7 @@ object GstAutomationEngine {
             // --- GSTR-1 AGGREGATION ---
             val b2bMap = mutableMapOf<String, MutableList<Gstr1Invoice>>()
             val b2csAccumulator = mutableMapOf<Triple<String, String, Double>, Gstr1B2csItem>()
+            val b2clMap = mutableMapOf<String, MutableList<Gstr1B2clInvoice>>()
             val hsnMap = mutableMapOf<String, Gstr1HsnDetail>()
 
             var totalSalesTaxable = 0.0
@@ -196,7 +197,13 @@ object GstAutomationEngine {
                     )
                 )
 
-                if (partyGstin.length >= 15) {
+                // The shared classifier, so the JSON agrees with the screen and the CSV.
+                // This branch used to be a hand-rolled `partyGstin.length >= 15` with no
+                // B2CL case at all, so an inter-state consumer invoice above Rs 1 lakh
+                // was aggregated into Table 7 in the file actually filed (H25).
+                val category = GstClassifier.classify(partyGstin, isInterstate, voucher.totalAmount)
+
+                if (category == SupplyCategory.B2B) {
                     // B2B Customer with GSTIN
                     val b2bInv = Gstr1Invoice(
                         inum = sanitizedInum,
@@ -208,6 +215,15 @@ object GstAutomationEngine {
                         itms = listOf(invItem)
                     )
                     b2bMap.getOrPut(partyGstin) { mutableListOf() }.add(b2bInv)
+                } else if (category == SupplyCategory.B2CL) {
+                    b2clMap.getOrPut(posStateCode) { mutableListOf() }.add(
+                        Gstr1B2clInvoice(
+                            inum = sanitizedInum,
+                            idt = dateStr,
+                            valAmt = voucher.totalAmount,
+                            itms = listOf(invItem)
+                        )
+                    )
                 } else {
                     // B2CS Consumer
                     // Table 7 is an AGGREGATE by place of supply, rate and supply type —
@@ -302,6 +318,7 @@ object GstAutomationEngine {
                 gt = totalSalesTaxable,
                 curGt = totalSalesTaxable,
                 b2b = b2bGroups,
+                b2cl = b2clMap.map { (pos, invoices) -> Gstr1B2clGroup(pos = pos, inv = invoices) },
                 b2cs = b2csAccumulator.values.toList(),
                 hsn = Gstr1HsnData(data = hsnMap.values.toList()),
                 docIssue = docSummary

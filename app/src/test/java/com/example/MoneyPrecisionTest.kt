@@ -129,6 +129,31 @@ class MoneyPrecisionTest {
         }
     }
 
+    @Test
+    fun `an exclusive entry posts legs that sum exactly to the stored total`() {
+        // The party leg is debited with the value toGrossAmount returns, while the sales
+        // and tax legs come from the breakdown. If the two disagree, every voucher leaves
+        // a residue on the party's ledger that no receipt can settle, and enough of them
+        // trip the "your books do not balance" banner.
+        listOf(1_234.56, 999.99, 10_000.0, 45_678.91, 7.77).forEach { base ->
+            listOf(0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { rate ->
+                val gross = GstCalculationService.toGrossAmount(base, rate, isGstInclusive = false)
+                val b = GstCalculationService.calculateGstBreakdown(gross, rate, isInterstate = false)
+                val legs = b.taxableValue + b.cgstAmount + b.sgstAmount + b.igstAmount
+                assertEquals("legs vs stored total for $base @ $rate%", gross, legs, 1e-9)
+                assertTrue("stored total must be 2dp", Money.isQuantised(gross))
+            }
+        }
+    }
+
+    @Test
+    fun `a non-finite amount is rejected rather than crashing`() {
+        // "NaN".toDoubleOrNull() succeeds in Kotlin and NaN passes an `amount <= 0`
+        // guard, so it reached BigDecimal("NaN") and threw NumberFormatException.
+        assertEquals(0.0, Money.paise(Double.NaN), 0.0)
+        assertEquals(0.0, Money.paise(Double.POSITIVE_INFINITY), 0.0)
+    }
+
     // ---- the helper itself ----
 
     @Test

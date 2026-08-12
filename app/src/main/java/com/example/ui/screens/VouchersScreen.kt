@@ -69,6 +69,9 @@ fun VouchersScreen(
     val initialType = if (initialVoucherType == VoucherType.JOURNAL) VoucherType.SALES else initialVoucherType
     var selectedVoucherType by remember(initialType) { mutableStateOf(initialType) }
     var partyName by remember { mutableStateOf("") }
+    // The buyer's GSTIN. Nothing captured this before, so GSTR-1 could never identify a
+    // B2B supply and every invoice fell into the consumer tables.
+    var partyGstin by remember { mutableStateOf("") }
     var amountText by remember { mutableStateOf("") }
     var selectedGstRate by remember { mutableStateOf("18") }
     var isInterstate by remember { mutableStateOf(false) }
@@ -514,7 +517,13 @@ fun VouchersScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
-                            if (selectedVoucherType == VoucherType.SALES || selectedVoucherType == VoucherType.PURCHASE) {
+                            // Returns carry GST as well: a credit note reverses the tax it
+                            // originally charged, so the rate must be settable on them too.
+                            if (selectedVoucherType == VoucherType.SALES ||
+                                selectedVoucherType == VoucherType.PURCHASE ||
+                                selectedVoucherType == VoucherType.SALES_RETURN ||
+                                selectedVoucherType == VoucherType.PURCHASE_RETURN
+                            ) {
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -634,6 +643,25 @@ fun VouchersScreen(
                             Spacer(modifier = Modifier.height(10.dp))
 
                             OutlinedTextField(
+                                value = partyGstin,
+                                onValueChange = { partyGstin = it.uppercase() },
+                                label = { Text("Buyer GSTIN (optional — required for a B2B invoice)") },
+                                placeholder = { Text("15 characters, e.g. 27AAPFU0939F1ZV") },
+                                supportingText = {
+                                    if (partyGstin.isNotBlank() && partyGstin.trim().length != 15) {
+                                        Text("A GSTIN is 15 characters", fontSize = 10.sp, color = AccountingRed)
+                                    } else if (partyGstin.trim().length == 15) {
+                                        Text("Reported as B2B in GSTR-1 Table 4A", fontSize = 10.sp, color = AccountingGreen)
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(16.dp),
+                                modifier = Modifier.fillMaxWidth().testTag("voucher_party_gstin_input")
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            OutlinedTextField(
                                 value = tagsText,
                                 onValueChange = { tagsText = it },
                                 label = { Text("Tags (e.g. #Travel, #ClientProject)") },
@@ -661,9 +689,17 @@ fun VouchersScreen(
                                             letterSpacing = 0.5.sp
                                         )
                                         Spacer(modifier = Modifier.height(6.dp))
-                                        MonetaryRow(label = "Party / Customer", amount = amount)
+                                        // Was the entered amount, shown beside components that sum to the gross —
+                                        // the card contradicted itself by the tax on an Exclusive entry.
+                                        MonetaryRow(label = "Party / Customer", amount = finalTotalAmount)
                                         MonetaryRow(label = "Taxable Base Value", amount = taxableValue)
-                                        if (selectedVoucherType == VoucherType.SALES || selectedVoucherType == VoucherType.PURCHASE) {
+                                        // Returns carry GST as well: a credit note reverses the tax it
+                            // originally charged, so the rate must be settable on them too.
+                            if (selectedVoucherType == VoucherType.SALES ||
+                                selectedVoucherType == VoucherType.PURCHASE ||
+                                selectedVoucherType == VoucherType.SALES_RETURN ||
+                                selectedVoucherType == VoucherType.PURCHASE_RETURN
+                            ) {
                                             if (!isInterstate) {
                                                 MonetaryRow(label = "CGST (${gstRate / 2}%)", amount = cgst)
                                                 MonetaryRow(label = "SGST (${gstRate / 2}%)", amount = sgst)
@@ -700,19 +736,30 @@ fun VouchersScreen(
 
                                 Button(
                                     onClick = {
+                                        // GST applies only to the types whose rate control is
+                                        // actually shown. The rate defaults to "18" and was
+                                        // passed unconditionally, so a Rs 7,000 Contra posted
+                                        // as Rs 8,260 with a phantom Rs 1,260 tax row — and the
+                                        // user was never shown a rate field to explain it.
+                                        val gstApplies = selectedVoucherType == VoucherType.SALES ||
+                                            selectedVoucherType == VoucherType.PURCHASE ||
+                                            selectedVoucherType == VoucherType.SALES_RETURN ||
+                                            selectedVoucherType == VoucherType.PURCHASE_RETURN
                                         viewModel.addVoucher(
                                             type = selectedVoucherType,
                                             partyName = partyName,
                                             amountText = amountText,
-                                            gstRateText = selectedGstRate,
-                                            isInterstate = isInterstate,
+                                            gstRateText = if (gstApplies) selectedGstRate else "0",
+                                            isInterstate = gstApplies && isInterstate,
                                             narration = narration,
                                             selectedItemId = selectedItem?.id,
                                             qtyText = qtyText,
                                             tags = tagsText,
-                                            isGstInclusive = isGstInclusive
+                                            isGstInclusive = !gstApplies || isGstInclusive,
+                                            partyGstin = partyGstin
                                         )
                                         partyName = ""
+                                        partyGstin = ""
                                         amountText = ""
                                         narration = ""
                                         tagsText = ""

@@ -33,8 +33,12 @@ object Money {
      * carries the full binary expansion (0.1 becomes 0.1000000000000000055511...) and
      * would defeat the rounding it is being asked to perform.
      */
-    fun paise(value: Double): Double =
-        BigDecimal(value.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+    fun paise(value: Double): Double {
+        // BigDecimal("NaN") throws. Kotlin's "NaN".toDoubleOrNull() succeeds and NaN
+        // slips past an `amount <= 0` guard, so a pasted "NaN" reached here and crashed.
+        if (!value.isFinite()) return 0.0
+        return BigDecimal(value.toString()).setScale(2, RoundingMode.HALF_UP).toDouble()
+    }
 
     /**
      * Whole rupees, HALF_UP — CGST Act s.170.
@@ -47,8 +51,10 @@ object Money {
      * under separate Acts and are never rounded as a combined total. Not for line items,
      * which stay at paise.
      */
-    fun rupees(value: Double): Double =
-        BigDecimal(value.toString()).setScale(0, RoundingMode.HALF_UP).toDouble()
+    fun rupees(value: Double): Double {
+        if (!value.isFinite()) return 0.0
+        return BigDecimal(value.toString()).setScale(0, RoundingMode.HALF_UP).toDouble()
+    }
 
     /** True when [value] is already exactly representable at paise precision. */
     fun isQuantised(value: Double): Boolean = paise(value) == value

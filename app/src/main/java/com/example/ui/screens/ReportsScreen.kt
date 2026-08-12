@@ -697,7 +697,16 @@ fun ReportsScreen(
                             ) {
                                 Button(
                                     onClick = {
-                                        val csv = CsvExporter.generateGstr1Csv(outboundSales, user)
+                                        val csv = CsvExporter.generateGstr1Csv(
+                                            outboundSales,
+                                            user,
+                                            // Without this the CSV classifies every invoice
+                                            // B2C while the card above it says B2B — the same
+                                            // two-surfaces-disagree failure H25 exists to stop.
+                                            buyerGstins = allLedgersForGst
+                                                .filter { it.gstin.isNotBlank() }
+                                                .associate { it.name.lowercase() to it.gstin }
+                                        )
                                         CsvExporter.shareCsvFile(context, "GSTR1_Summary_${System.currentTimeMillis()}.csv", csv)
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),

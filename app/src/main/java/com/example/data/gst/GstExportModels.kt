@@ -79,12 +79,33 @@ data class Gstr1DocSummary(
     @SerializedName("doc_det") val docDet: List<Gstr1DocDetail>
 )
 
+/**
+ * GSTR-1 Table 5A — inter-state supplies to unregistered persons above the threshold,
+ * reported invoice-wise rather than in aggregate.
+ *
+ * There was no such model, so every B2CL invoice was folded into the aggregate B2CS
+ * table in the payload actually filed — while the on-screen summary correctly showed it
+ * as B2CL. The two surfaces disagreed about the same invoice.
+ */
+data class Gstr1B2clInvoice(
+    @SerializedName("inum") val inum: String,
+    @SerializedName("idt") val idt: String,
+    @SerializedName("val") val valAmt: Double,
+    @SerializedName("itms") val itms: List<Gstr1InvoiceItem>
+)
+
+data class Gstr1B2clGroup(
+    @SerializedName("pos") val pos: String,
+    @SerializedName("inv") val inv: List<Gstr1B2clInvoice>
+)
+
 data class Gstr1Payload(
     @SerializedName("gstin") val gstin: String,
     @SerializedName("fp") val fp: String, // MMYYYY
     @SerializedName("gt") val gt: Double = 0.0,
     @SerializedName("cur_gt") val curGt: Double = 0.0,
     @SerializedName("b2b") val b2b: List<Gstr1B2bGroup>,
+    @SerializedName("b2cl") val b2cl: List<Gstr1B2clGroup> = emptyList(),
     @SerializedName("b2cs") val b2cs: List<Gstr1B2csItem>,
     @SerializedName("hsn") val hsn: Gstr1HsnData,
     @SerializedName("doc_issue") val docIssue: Gstr1DocSummary

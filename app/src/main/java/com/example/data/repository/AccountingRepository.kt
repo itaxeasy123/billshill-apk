@@ -506,8 +506,17 @@ class AccountingRepository(
                 // and returned it unchanged: the asset was debited into the vendor's
                 // creditor account, which then carried a debit balance and no fixed asset
                 // existed anywhere (H2).
+                // Words that mean the spend was an EXPENSE on an asset, not the purchase
+                // of one. Without this, "annual maintenance of computer" was capitalised
+                // as a fixed asset and net profit overstated by the whole amount.
+                val expenseWords = listOf(
+                    "maintenance", "repair", "service", "rent", "hire", "lease",
+                    "polish", "cleaning", "spare", "consumable", "amc", "insurance"
+                )
                 val assetWords = listOf("asset", "machinery", "equipment", "furniture", "vehicle", "computer")
-                val isAssetPurchase = assetWords.any { narration.lowercase().contains(it) }
+                val lowerNarration = narration.lowercase()
+                val isAssetPurchase = assetWords.any { lowerNarration.contains(it) } &&
+                    expenseWords.none { lowerNarration.contains(it) }
 
                 val destinationLedger = if (isAssetPurchase) {
                     // Named for the thing bought, never for the vendor.
@@ -646,7 +655,14 @@ class AccountingRepository(
                 val cashLedger = cashLedger()
                 val bankLedger = bankLedger()
 
-                if (partyName.lowercase().contains("withdrawal") || partyName.lowercase().contains("cash to bank")) {
+                // "cash to bank" means cash going INTO the bank — a deposit, Dr Bank /
+                // Cr Cash. It was grouped with "withdrawal", which is the opposite
+                // direction, so any Contra whose party text literally read "Cash to Bank"
+                // posted the transfer backwards.
+                val isWithdrawal = partyName.lowercase().let {
+                    it.contains("withdraw") || it.contains("bank to cash") || it.contains("from bank")
+                }
+                if (isWithdrawal) {
                     // Debit Cash, Credit Bank
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = cashLedger.id, debitAmount = amount, creditAmount = 0.0))
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = bankLedger.id, debitAmount = 0.0, creditAmount = amount))
@@ -677,7 +693,15 @@ class AccountingRepository(
         selectedItemId: Long? = null,
         itemQuantity: Double = 1.0,
         itemRate: Double = 0.0,
-        tags: String = ""
+        tags: String = "",
+        /**
+         * The BUYER's GSTIN. Whether a supply is B2B or B2C turns on whether the
+         * recipient is registered, and nothing in the app ever captured this — the
+         * classifier was correct but permanently starved of input, so every sale fell to
+         * B2C. Recorded on the party's ledger when supplied, so it is remembered for
+         * their next invoice too.
+         */
+        partyGstin: String = ""
     ): Long {
         // 1. Calculate GST components via GstCalculationService
         val gstBreakdown = GstCalculationService.calculateGstBreakdown(
@@ -692,7 +716,12 @@ class AccountingRepository(
         val igstAmount = gstBreakdown.igstAmount
 
         // 2. Ensure Party Ledger exists, or AUTO-CREATE
-        val partyLedger = getOrCreatePartyLedger(partyName, voucherType)
+        var partyLedger = getOrCreatePartyLedger(partyName, voucherType)
+        val cleanedGstin = partyGstin.trim()
+        if (cleanedGstin.isNotBlank() && partyLedger.gstin != cleanedGstin) {
+            partyLedger = partyLedger.copy(gstin = cleanedGstin)
+            dao.updateLedger(partyLedger)
+        }
 
         // 3. Save Voucher header
         val voucherNo = generateNextVoucherNo(voucherType)
@@ -860,7 +889,13 @@ class AccountingRepository(
                 name = name,
                 groupId = group.id,
                 groupName = group.name,
-                category = group.category,
+                // The CALLER's category, not the group's. A ledger's category can
+                // legitimately differ from its group: "Input CGST" is an ASSET sitting in
+                // "Duties & Taxes", which is a liability group. Overwriting it here forced
+                // input credit to LIABILITY, so it was reported on the wrong face of the
+                // Balance Sheet — and because Output +9,000 and Input −9,000 then netted
+                // to zero, the whole group was dropped by the non-zero filter.
+                category = category,
                 openingBalance = 0.0,
                 balanceType = if (category == LedgerCategory.ASSET || category == LedgerCategory.EXPENSE) BalanceType.DR else BalanceType.CR
             )
@@ -894,9 +929,15 @@ class AccountingRepository(
             gstDetail = dao.getGstTaxDetailForVoucher(voucherId)
         )
 
+        // A purchase reversal must unwind the weighted-average cost it rolled forward,
+        // not just the quantity — otherwise the inflated average stays behind.
+        if (voucher.voucherType == VoucherType.PURCHASE) {
+            snapshot.items.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.rate) }
+        }
         dao.deleteVoucherAtomic(
             voucherId = voucherId,
-            stockReversals = snapshot.items.map { it.itemId to -stockDirection(voucher.voucherType) * it.quantity }
+            stockReversals = if (voucher.voucherType == VoucherType.PURCHASE) emptyList()
+            else snapshot.items.map { it.itemId to -stockDirection(voucher.voucherType) * it.quantity }
         )
 
         dao.insertSyncLog(
@@ -1002,8 +1043,18 @@ class AccountingRepository(
         // entry with no tax row is exactly what a manual journal is, and rewriting its
         // two amounts is the right amendment for it however it was created.
         val existingLegs = dao.getJournalEntriesForVoucher(voucherId)
-        val isManualTwoLegEntry = existingLegs.size == 2 &&
+        // Two legs and no tax describes a manual journal — but it ALSO describes every
+        // zero-GST Receipt, Payment and Contra, and routing those here would silently
+        // discard a changed party or voucher type while the toast reported success. So
+        // this path is taken only when neither of those identifying fields changed, i.e.
+        // the edit is confined to amount, narration, date and tags. Anything that
+        // re-identifies the voucher goes through the full re-post.
+        val identityUnchanged = voucherType == existing.voucherType &&
+            partyName.trim().equals(existing.partyName.trim(), ignoreCase = true)
+        val isManualTwoLegEntry = identityUnchanged &&
+            existingLegs.size == 2 &&
             existing.gstAmount == 0.0 &&
+            gstRate <= 0.0 &&
             dao.getGstTaxDetailForVoucher(voucherId) == null &&
             dao.getVoucherItemsForVoucher(voucherId).isEmpty()
         if (isManualTwoLegEntry) {
@@ -1025,7 +1076,12 @@ class AccountingRepository(
 
         // Reverse using the OLD voucher's type and quantities. The edit may have changed
         // the type, and reversing with the new one would move stock the wrong way.
-        val reversals = oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
+        // Same on amendment: unwind cost as well as quantity for a purchase.
+        if (existing.voucherType == VoucherType.PURCHASE) {
+            oldItems.forEach { dao.reverseStockAtCost(it.itemId, it.quantity, it.rate) }
+        }
+        val reversals = if (existing.voucherType == VoucherType.PURCHASE) emptyList()
+        else oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
 
         inTransaction {
         dao.clearVoucherChildrenAtomic(

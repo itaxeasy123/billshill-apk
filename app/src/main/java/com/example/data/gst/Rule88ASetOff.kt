@@ -53,8 +53,12 @@ object Rule88ASetOff {
 
     /**
      * @return per-head cash payable and credit carried forward, satisfying
-     *   `creditUsed + creditCarriedForward == creditAvailable` and
-     *   `creditUsed + payableInCash == liability` for every head.
+     *   `creditUsed + creditCarriedForward == creditAvailable` for every head.
+     *
+     *   Note the OTHER invariant holds only for CGST and SGST: IGST's `creditUsed`
+     *   counts credit spent on all three heads, so `creditUsed + payableInCash` exceeds
+     *   IGST's own liability whenever spillover occurs. The KDoc previously claimed it
+     *   universally, which is not true.
      */
     fun compute(
         outputIgst: Double,
@@ -75,19 +79,49 @@ object Rule88ASetOff {
         val igstUsedOnIgst = minOf(poolIgst, liabIgst)
         poolIgst -= igstUsedOnIgst
 
-        // 2. Remaining IGST credit spills over to CGST and SGST. It MUST be fully
-        //    exhausted before either of their own credits may be used.
-        val igstUsedOnCgst = minOf(poolIgst, liabCgst)
-        poolIgst -= igstUsedOnCgst
-        val igstUsedOnSgst = minOf(poolIgst, liabSgst - 0.0)
-        poolIgst -= igstUsedOnSgst
+        // 2. Remaining IGST credit spills over to CGST and SGST, and must be fully
+        //    exhausted before either head's own credit may be used.
+        //
+        //    Rule 88A leaves the ORDER of that spill to the taxpayer, and the order
+        //    matters: pushing greedily at CGST first strands CGST's own credit, which
+        //    cannot be used against SGST (s.49(5)) and so sits in carry-forward while
+        //    cash goes out for SGST. With output 90,000/90,000 and credit IGST 1,00,000 +
+        //    CGST 50,000, greedy-CGST pays 80,000 where the optimum pays 30,000.
+        //
+        //    So the spill is directed where own credit CANNOT reach: each head is first
+        //    covered by its own credit, and IGST fills what remains.
+        val ownCgstAvailable = Money.paise(maxOf(0.0, creditCgst))
+        val ownSgstAvailable = Money.paise(maxOf(0.0, creditSgst))
 
-        // 3. Only now may each head use its own credit — and never the other's (s.49(5)).
-        val cgstRemaining = liabCgst - igstUsedOnCgst
-        val cgstOwnUsed = minOf(Money.paise(maxOf(0.0, creditCgst)), cgstRemaining)
+        val cgstShortfall = maxOf(0.0, liabCgst - ownCgstAvailable)
+        val sgstShortfall = maxOf(0.0, liabSgst - ownSgstAvailable)
 
-        val sgstRemaining = liabSgst - igstUsedOnSgst
-        val sgstOwnUsed = minOf(Money.paise(maxOf(0.0, creditSgst)), sgstRemaining)
+        var igstOnCgst = minOf(poolIgst, cgstShortfall)
+        poolIgst -= igstOnCgst
+        var igstOnSgst = minOf(poolIgst, sgstShortfall)
+        poolIgst -= igstOnSgst
+
+        // Any IGST credit still left must be used before own credit — it cannot be
+        // carried forward while cash is being paid.
+        val cgstStillDue = liabCgst - igstOnCgst
+        val extraOnCgst = minOf(poolIgst, cgstStillDue)
+        igstOnCgst += extraOnCgst
+        poolIgst -= extraOnCgst
+
+        val sgstStillDue = liabSgst - igstOnSgst
+        val extraOnSgst = minOf(poolIgst, sgstStillDue)
+        igstOnSgst += extraOnSgst
+        poolIgst -= extraOnSgst
+
+        // 3. Each head now covers what remains from its own credit, never the other's.
+        val cgstRemaining = liabCgst - igstOnCgst
+        val cgstOwnUsed = minOf(ownCgstAvailable, cgstRemaining)
+
+        val sgstRemaining = liabSgst - igstOnSgst
+        val sgstOwnUsed = minOf(ownSgstAvailable, sgstRemaining)
+
+        val igstUsedOnCgst = igstOnCgst
+        val igstUsedOnSgst = igstOnSgst
 
         return SetOffResult(
             igst = HeadResult(
@@ -100,17 +134,17 @@ object Rule88ASetOff {
             ),
             cgst = HeadResult(
                 liability = liabCgst,
-                creditAvailable = Money.paise(maxOf(0.0, creditCgst)),
+                creditAvailable = ownCgstAvailable,
                 creditUsed = cgstOwnUsed,
                 payableInCash = Money.paise(cgstRemaining - cgstOwnUsed),
-                creditCarriedForward = Money.paise(maxOf(0.0, creditCgst) - cgstOwnUsed)
+                creditCarriedForward = Money.paise(ownCgstAvailable - cgstOwnUsed)
             ),
             sgst = HeadResult(
                 liability = liabSgst,
-                creditAvailable = Money.paise(maxOf(0.0, creditSgst)),
+                creditAvailable = ownSgstAvailable,
                 creditUsed = sgstOwnUsed,
                 payableInCash = Money.paise(sgstRemaining - sgstOwnUsed),
-                creditCarriedForward = Money.paise(maxOf(0.0, creditSgst) - sgstOwnUsed)
+                creditCarriedForward = Money.paise(ownSgstAvailable - sgstOwnUsed)
             )
         )
     }

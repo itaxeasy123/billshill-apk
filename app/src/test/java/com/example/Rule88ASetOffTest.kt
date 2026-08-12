@@ -17,13 +17,19 @@ class Rule88ASetOffTest {
         // Output CGST 90,000 / SGST 90,000 / IGST 0
         // Credit IGST 1,50,000 / CGST 15,000 / SGST 15,000
         //
-        // IGST credit meets no IGST liability, so all 1,50,000 spills over: 90,000 clears
-        // CGST entirely, 60,000 reduces SGST to 30,000. CGST's own 15,000 cannot be used
-        // (nothing left to pay) and carries forward. SGST's own 15,000 reduces SGST to
-        // 15,000 payable.
+        // Total liability 1,80,000; total credit 1,80,000. Rule 88A requires IGST credit
+        // be exhausted first and then leaves the CGST/SGST split to the taxpayer, "in any
+        // order and in any proportion" — so directing it at each head's SHORTFALL
+        // (75,000 + 75,000) lets each head's own 15,000 finish the job and NOTHING is
+        // paid in cash.
         //
-        // The old code reported CGST 75,000, SGST 75,000 and a total of 0 — four cells of
-        // one row disagreeing, with the correct 15,000 appearing nowhere.
+        // The greedy reading — push all of it at CGST, then SGST — is equally legal and
+        // strictly worse: it clears CGST with 90,000, leaves 60,000 for SGST, strands
+        // CGST's own 15,000 (which cannot cross to SGST under s.49(5)) and demands
+        // 15,000 in cash while carrying 15,000 of credit forward.
+        //
+        // For reference, the code this replaced reported CGST 75,000, SGST 75,000 and a
+        // total of 0 — four cells of one row disagreeing by 1,50,000.
         val r = Rule88ASetOff.compute(
             outputIgst = 0.0, outputCgst = 90_000.0, outputSgst = 90_000.0,
             creditIgst = 150_000.0, creditCgst = 15_000.0, creditSgst = 15_000.0
@@ -31,11 +37,12 @@ class Rule88ASetOffTest {
 
         assertEquals(0.0, r.cashIgst, 0.0)
         assertEquals(0.0, r.cashCgst, 0.0)
-        assertEquals(15_000.0, r.cashSgst, 0.0)
-        assertEquals(15_000.0, r.totalCash, 0.0)
+        assertEquals(0.0, r.cashSgst, 0.0)
+        assertEquals("credit exactly covers liability — nothing to pay", 0.0, r.totalCash, 0.0)
 
-        // The CGST credit that could not be used is carried forward, not destroyed.
-        assertEquals(15_000.0, r.cgst.creditCarriedForward, 0.0)
+        // And nothing is left stranded either.
+        assertEquals(0.0, r.cgst.creditCarriedForward, 0.0)
+        assertEquals(0.0, r.sgst.creditCarriedForward, 0.0)
         assertEquals(0.0, r.igst.creditCarriedForward, 0.0)
     }
 
@@ -60,6 +67,21 @@ class Rule88ASetOffTest {
         // 5,000 of IGST credit remains and spills onto CGST.
         assertEquals(5_000.0, r.cashCgst, 0.0)
         assertEquals(10_000.0, r.cashSgst, 0.0)
+    }
+
+    @Test
+    fun `spillover does not strand own-head credit`() {
+        // Output CGST 90,000 / SGST 90,000; credit IGST 1,00,000 / CGST 50,000 / SGST 0.
+        // Pushing IGST greedily at CGST first leaves CGST's own 50,000 unusable — it
+        // cannot cross to SGST — so cash goes out for SGST while credit sits idle. That
+        // ordering demanded 80,000; directing the spill where own credit cannot reach
+        // pays the correct 30,000.
+        val r = Rule88ASetOff.compute(
+            outputIgst = 0.0, outputCgst = 90_000.0, outputSgst = 90_000.0,
+            creditIgst = 100_000.0, creditCgst = 50_000.0, creditSgst = 0.0
+        )
+        assertEquals(30_000.0, r.totalCash, 0.0)
+        assertEquals(0.0, r.igst.creditCarriedForward, 0.0)
     }
 
     @Test

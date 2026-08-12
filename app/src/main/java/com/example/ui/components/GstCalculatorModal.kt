@@ -248,7 +248,7 @@ fun GstCalculatorModal(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        listOf(5.0, 12.0, 18.0, 28.0).forEach { slab ->
+                        listOf(0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { slab ->
                             val isSelected = !isCustomSelected && selectedSlab == slab
                             FilterChip(
                                 selected = isSelected,

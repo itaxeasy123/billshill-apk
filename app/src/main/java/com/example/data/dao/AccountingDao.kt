@@ -296,6 +296,26 @@ interface AccountingDao {
      * Guarded so a nil or negative resulting quantity leaves the cost alone rather than
      * dividing by zero — stock is allowed to go negative here (C9).
      */
+    /**
+     * Reverses a stock receipt, unwinding the weighted average as well as the quantity.
+     *
+     * `receiveStockAtCost` rolls the average forward on purchase, but the reversal paths
+     * only moved quantity — so amending or deleting a purchase left the inflated average
+     * behind. 100 units at Rs 50 plus 10 at Rs 100 gives 110 at Rs 54.545; reversing only
+     * the quantity leaves 100 units still valued at Rs 54.545, or Rs 5,454.55 against a
+     * true Rs 5,000, and that phantom Rs 454.55 flows into closing stock and gross profit.
+     */
+    @Transaction
+    suspend fun reverseStockAtCost(itemId: Long, quantity: Double, unitCost: Double) {
+        val item = getInventoryItemById(itemId) ?: return
+        val newQty = item.stockQty - quantity
+        if (quantity > 0.0 && newQty > 0.0) {
+            val remainingValue = item.stockQty * item.avgCostPrice - quantity * unitCost
+            updateAvgCostPrice(itemId, (remainingValue / newQty).coerceAtLeast(0.0))
+        }
+        updateStockQty(itemId, -quantity)
+    }
+
     @Transaction
     suspend fun receiveStockAtCost(itemId: Long, quantity: Double, unitCost: Double) {
         val item = getInventoryItemById(itemId) ?: return
@@ -605,7 +625,12 @@ interface AccountingDao {
         """
         SELECT l.id AS id, l.name AS name,
             COALESCE(lg.name, l.groupName) AS groupName,
-            COALESCE(lg.category, l.category) AS category,
+            -- The LEDGER's own category takes precedence over its group's. They are kept
+            -- in step by createLedger/updateLedgerDetails and repaired by MIGRATION_8_9,
+            -- and they legitimately differ for input GST: an ASSET inside the liability
+            -- group "Duties & Taxes". Reading the group's category put unutilised ITC on
+            -- the liabilities face and understated both sides.
+            COALESCE(l.category, lg.category) AS category,
             COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.debitAmount ELSE 0 END), 0)
               + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END AS totalDebit,
             COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.creditAmount ELSE 0 END), 0)

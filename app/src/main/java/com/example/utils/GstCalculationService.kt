@@ -35,8 +35,16 @@ object GstCalculationService {
         gstRatePercentage: Double,
         isGstInclusive: Boolean
     ): Double {
-        if (isGstInclusive || gstRatePercentage <= 0.0 || enteredAmount <= 0.0) return enteredAmount
-        return enteredAmount * (1.0 + (gstRatePercentage / 100.0))
+        if (isGstInclusive || gstRatePercentage <= 0.0 || enteredAmount <= 0.0) {
+            return Money.paise(enteredAmount)
+        }
+        // Quantised here too. Returning the raw product meant createVoucher stored an
+        // unrounded totalAmount and debited the party with it, while the sales and tax
+        // legs came from the quantised breakdown — so an Exclusive entry of Rs 1,234.56
+        // at 18% posted Dr 1456.7807999999998 against Cr 1456.78 and left a sub-paisa
+        // imbalance on every voucher, which accumulates into the "your books do not
+        // balance" banner and strands an unsettleable residue on the party's ledger.
+        return Money.paise(enteredAmount * (1.0 + (gstRatePercentage / 100.0)))
     }
 
     /** GST slabs an Indian invoice can actually carry, including the 40% de-merit rate. */

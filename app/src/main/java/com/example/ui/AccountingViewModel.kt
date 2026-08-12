@@ -283,18 +283,23 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun login(phoneNumber: String, otp: String) {
+    /**
+     * Records the phone number that identifies these books and opens the app.
+     *
+     * The OTP guard that used to sit here was left behind when the fake OTP step was
+     * removed from the screen: the button passed an empty string, `otp.length < 4`
+     * returned early, `isLoggedIn` was never set, and since the seed writes
+     * `isLoggedIn = false` and MainActivity shows AuthScreen while it is false, a fresh
+     * install could not get past the first screen at all.
+     */
+    fun login(phoneNumber: String) {
         viewModelScope.launch {
-            if (phoneNumber.length < 10) {
+            if (phoneNumber.trim().length < 10) {
                 _messageEvent.emit("Please enter a valid 10-digit mobile number")
                 return@launch
             }
-            if (otp.length < 4) {
-                _messageEvent.emit("Please enter a valid OTP")
-                return@launch
-            }
-            repository.loginWithOtp(phoneNumber, otp)
-            _messageEvent.emit("Login Successful! Welcome to Mobile Accounting.")
+            repository.loginWithOtp(phoneNumber.trim(), "")
+            _messageEvent.emit("Welcome — your books are ready.")
         }
     }
 
@@ -441,6 +446,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         selectedItemId: Long? = null,
         qtyText: String = "1",
         tags: String = "",
+        partyGstin: String = "",
         // Defaults to true because every other entry path (QR scan, bulk import, Tally
         // XML, quick entry) supplies a bill total that already includes tax. Only the
         // voucher wizard, which shows the user an Exclusive/Inclusive toggle, passes
@@ -473,7 +479,8 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 narration = narration,
                 selectedItemId = selectedItemId,
                 itemQuantity = qty,
-                tags = tags
+                tags = tags,
+                partyGstin = partyGstin
             )
             _messageEvent.emit("Voucher created & debits/credits balanced automatically!")
         }
@@ -679,7 +686,13 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         dateMillis: Long,
         tags: String,
         selectedItemId: Long? = null,
-        qtyText: String = "1"
+        // Nullable, and null by default. This defaulted to "1" and was passed on as
+        // `?: 1.0`, which turned amendVoucher's "null means unchanged" contract into a
+        // literal quantity of 1 — so amending a 10-unit sale reversed 10 units of stock
+        // and re-applied only 1, leaving 9 phantom units on the shelf, a voucher_items
+        // row reading qty 1, and closing stock and profit overstated. The Balance Sheet
+        // still balanced, so nothing in the app could surface it.
+        qtyText: String? = null
     ) {
         viewModelScope.launch {
             if (partyName.isBlank()) {
@@ -704,7 +717,7 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 dateMillis = dateMillis,
                 tags = tags,
                 selectedItemId = selectedItemId,
-                itemQuantity = qtyText.toDoubleOrNull() ?: 1.0
+                itemQuantity = qtyText?.toDoubleOrNull()
             )
             _messageEvent.emit("Voucher updated; number and date preserved.")
         }

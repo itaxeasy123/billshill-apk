@@ -117,7 +117,7 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                     // sat next to a "Verify" button that verified nothing. An app that
                     // stores its books locally does not need a login; pretending to
                     // authenticate is worse than not claiming to.
-                    onClick = { viewModel.login(phoneNumber, "") },
+                    onClick = { viewModel.login(phoneNumber) },
                     enabled = phoneNumber.trim().length >= 10,
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
