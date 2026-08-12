@@ -223,4 +223,76 @@ class FirestoreSyncManager {
             Result.failure(e)
         }
     }
+
+    // ---- Full-fidelity cloud snapshot ----
+    //
+    // The per-field maps above carry 4 entity types and cannot reproduce a set of
+    // books: no ledger groups, no journal entries, no GST detail rows, no voucher
+    // numbering state. Restoring from them meant re-posting vouchers, which reissued
+    // numbers and guessed tax rates. This stores the same full-fidelity JSON the
+    // on-device backup writes, as a single document, so a cloud restore and a local
+    // restore produce identical books.
+
+    /** Firestore's hard per-document ceiling is 1 MiB; stay clear of it. */
+    private val maxSnapshotBytes = 900_000
+
+    suspend fun uploadBooksSnapshot(phoneNumber: String, json: String): Result<String> {
+        return try {
+            val firestore = db ?: return Result.failure(Exception("Firestore is unavailable"))
+            val bytes = json.toByteArray(Charsets.UTF_8).size
+            if (bytes > maxSnapshotBytes) {
+                return Result.failure(
+                    Exception(
+                        "Books are too large for a single cloud backup ($bytes bytes, limit " +
+                            "$maxSnapshotBytes). Use an on-device backup and copy the file off " +
+                            "the phone instead."
+                    )
+                )
+            }
+            firestore.collection("accounting_users")
+                .document(phoneNumber)
+                .collection("book_snapshots")
+                .document("latest")
+                .set(
+                    mapOf(
+                        "json" to json,
+                        "sizeBytes" to bytes,
+                        "updatedAt" to System.currentTimeMillis()
+                    )
+                )
+                .await()
+            Result.success("Cloud snapshot updated ($bytes bytes)")
+        } catch (e: Exception) {
+            Log.e("FirestoreSyncManager", "Snapshot upload failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun downloadBooksSnapshot(phoneNumber: String): Result<String> {
+        return try {
+            val firestore = db ?: return Result.failure(Exception("Firestore is unavailable"))
+            val snap = firestore.collection("accounting_users")
+                .document(phoneNumber)
+                .collection("book_snapshots")
+                .document("latest")
+                .get()
+                .await()
+
+            val json = snap.getString("json")
+            if (!snap.exists() || json.isNullOrBlank()) {
+                Result.failure(
+                    Exception(
+                        "No full cloud backup found for this account. Press Sync Books first — " +
+                            "older cloud data cannot reproduce voucher numbers, dates or ledger " +
+                            "groups, so it is not restored."
+                    )
+                )
+            } else {
+                Result.success(json)
+            }
+        } catch (e: Exception) {
+            Log.e("FirestoreSyncManager", "Snapshot download failed", e)
+            Result.failure(e)
+        }
+    }
 }

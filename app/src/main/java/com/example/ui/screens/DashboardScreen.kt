@@ -1710,15 +1710,12 @@ fun DocumentExtractImportSection(
     viewModel: AccountingViewModel,
     user: UserEntity
 ) {
-    var rawText by remember {
-        mutableStateOf(
-            "01/10/2026, Salary Receipt, RECEIPT, 85000.00\n" +
-            "05/10/2026, Vendor Payment SS Corp, PAYMENT, 24500.00\n" +
-            "10/10/2026, Cash Deposit Contra, CONTRA, 15000.00\n" +
-            "15/10/2026, Client Fee Batra Sons, RECEIPT, 42000.00\n" +
-            "20/10/2026, AC Air Conditioner Purchase, PURCHASE, 38000.00"
-        )
-    }
+    // Starts empty on purpose. This box used to ship pre-filled with five invented
+    // transactions (Salary Receipt 85,000, Vendor Payment SS Corp 24,500, ...). On a
+    // fresh install all five validated as VALID, and one tap on "Import Valid Only"
+    // wrote them into the user's real ledger. Every other fabrication in the app is a
+    // display lie; this one became persisted financial data.
+    var rawText by remember { mutableStateOf("") }
     var documentType by remember { mutableStateOf("Bank Statement (PDF/Excel)") }
     var importedSuccessMessage by remember { mutableStateOf<String?>(null) }
 
@@ -1826,6 +1823,16 @@ fun DocumentExtractImportSection(
                 value = rawText,
                 onValueChange = { rawText = it },
                 label = { Text("Document Extracted Data (CSV / Text)") },
+                // The format guidance the seeded rows used to provide — as a placeholder,
+                // which cannot be imported, instead of as real text in the box.
+                placeholder = {
+                    Text(
+                        "One transaction per line:\n" +
+                            "DD/MM/YYYY, Party Name, TYPE, Amount\n" +
+                            "TYPE is SALES, PURCHASE, RECEIPT, PAYMENT or CONTRA",
+                        fontSize = 11.sp
+                    )
+                },
                 modifier = Modifier.fillMaxWidth().height(120.dp).testTag("csv_import_input"),
                 shape = RoundedCornerShape(14.dp)
             )

@@ -184,9 +184,25 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 ledgers = ledgersState.value,
                 inventory = inventoryState.value
             )
+            // Upload the full-fidelity snapshot too. The per-entity documents above stay
+            // for anything reading them, but they carry 4 of 13 tables and cannot
+            // reproduce a set of books — the snapshot is what Restore Books reads.
+            val snapshotResult = if (result.isSuccess) {
+                runCatching { repository.exportBooksToJson() }
+                    .fold(
+                        onSuccess = { firestoreSyncManager.uploadBooksSnapshot(user.phoneNumber, it) },
+                        onFailure = { Result.failure(it) }
+                    )
+            } else null
+
             _isSyncing.value = false
             if (result.isSuccess) {
-                val msg = result.getOrNull() ?: "Cloud sync complete!"
+                val msg = if (snapshotResult?.isSuccess == true) {
+                    result.getOrNull() ?: "Cloud sync complete!"
+                } else {
+                    val err = snapshotResult?.exceptionOrNull()?.message ?: "snapshot upload failed"
+                    "Synced, but this backup cannot be restored from: $err"
+                }
                 _syncStatusMessage.value = msg
                 _messageEvent.emit(msg)
             } else {
@@ -202,25 +218,27 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             _isSyncing.value = true
             _syncStatusMessage.value = "Restoring books from Firestore..."
-            val result = firestoreSyncManager.restoreFromCloud(user.phoneNumber)
+            val result = firestoreSyncManager.downloadBooksSnapshot(user.phoneNumber)
             _isSyncing.value = false
             if (result.isSuccess) {
-                val payload = result.getOrNull()
-                if (payload != null) {
-                    var restoredCount = 0
-                    payload.vouchers.forEach { v ->
-                        repository.createVoucher(
-                            voucherType = v.voucherType,
-                            partyName = v.partyName,
-                            amount = v.totalAmount,
-                            isInterstate = v.isInterstate,
-                            narration = v.narration
-                        )
-                        restoredCount++
+                val json = result.getOrNull()
+                if (json != null) {
+                    try {
+                        // Replaces, transactionally, from the full snapshot. The previous
+                        // implementation re-posted each voucher through createVoucher with
+                        // no gstRate argument, so every restored voucher silently became
+                        // 18% regardless of what it had been; it also fetched ledgers and
+                        // inventory and then discarded both, and appended rather than
+                        // replaced, doubling the books on a second restore.
+                        val rows = repository.restoreBooksFromJson(json)
+                        val msg = "Books restored from cloud — $rows records."
+                        _syncStatusMessage.value = msg
+                        _messageEvent.emit(msg)
+                    } catch (e: Exception) {
+                        val msg = "Cloud restore failed, books unchanged: ${e.message ?: "unreadable snapshot"}"
+                        _syncStatusMessage.value = msg
+                        _messageEvent.emit(msg)
                     }
-                    val msg = "Restored $restoredCount vouchers from Firestore!"
-                    _syncStatusMessage.value = msg
-                    _messageEvent.emit(msg)
                 }
             } else {
                 val err = result.exceptionOrNull()?.message ?: "Restore failed"
