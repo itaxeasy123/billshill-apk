@@ -105,6 +105,24 @@ interface AccountingDao {
     @Query("SELECT * FROM ledgers WHERE name = :name LIMIT 1")
     suspend fun getLedgerByName(name: String): LedgerEntity?
 
+    /** Resolves a system ledger by its stable code rather than by a spelling. */
+    @Query("SELECT * FROM ledgers WHERE systemCode = :code LIMIT 1")
+    suspend fun getLedgerBySystemCode(code: String): LedgerEntity?
+
+    /**
+     * Name match ignoring case, spaces and hyphens, so "Cash in Hand", "Cash-in-Hand"
+     * and "Cash-in-hand" all collide. Used once, when adopting an existing ledger into a
+     * system code, so an upgrading book keeps the account it already has.
+     */
+    @Query(
+        """
+        SELECT * FROM ledgers
+        WHERE REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') = REPLACE(REPLACE(LOWER(:name), ' ', ''), '-', '')
+        ORDER BY id ASC LIMIT 1
+        """
+    )
+    suspend fun getLedgerByLooseName(name: String): LedgerEntity?
+
     @Query("SELECT * FROM ledgers WHERE id = :id LIMIT 1")
     suspend fun getLedgerById(id: Long): LedgerEntity?
 

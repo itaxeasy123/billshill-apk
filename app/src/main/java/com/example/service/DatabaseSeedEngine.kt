@@ -67,8 +67,8 @@ object DatabaseSeedEngine {
         )
 
         // 3. Default Chart of Accounts Ledgers
-        dao.insertLedger(LedgerEntity(name = "Cash in Hand", groupId = cashGrp, groupName = "Cash-in-Hand", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR))
-        dao.insertLedger(LedgerEntity(name = "Bank Account", groupId = bankGrp, groupName = "Bank Accounts", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "Cash in Hand", groupId = cashGrp, groupName = "Cash-in-Hand", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR, systemCode = com.example.data.repository.SYSTEM_LEDGER_CASH))
+        dao.insertLedger(LedgerEntity(name = "Bank Account", groupId = bankGrp, groupName = "Bank Accounts", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR, systemCode = com.example.data.repository.SYSTEM_LEDGER_BANK))
         dao.insertLedger(LedgerEntity(name = "Sales Account", groupId = salesGrp, groupName = "Sales Accounts", category = LedgerCategory.REVENUE, openingBalance = 0.0, balanceType = BalanceType.CR))
         dao.insertLedger(LedgerEntity(name = "Purchase Account", groupId = purchaseGrp, groupName = "Purchase Accounts", category = LedgerCategory.EXPENSE, openingBalance = 0.0, balanceType = BalanceType.DR))
 

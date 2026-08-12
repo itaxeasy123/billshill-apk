@@ -61,6 +61,72 @@ val MIGRATION_8_9 = object : Migration(8, 9) {
     }
 }
 
+/**
+ * Adds `ledgers.systemCode` and repairs the split cash ledger (C2).
+ *
+ * The seed writes a ledger named "Cash in Hand"; the posting engine looked one up by the
+ * exact, case-sensitive name "Cash-in-hand". That never matched, so every Receipt,
+ * Payment and Contra created a second cash ledger — leaving the Trial Balance showing one
+ * cash account holding the opening balance and never moving, and another holding every
+ * movement with a **credit** balance, which is an impossibility for a cash account and
+ * now renders on the face of the Balance Sheet.
+ *
+ * The merge has to be deterministic and silent: a Migration runs headless on a background
+ * thread and cannot ask the user which account to keep. The canonical row is therefore
+ * the lowest id among loose-name matches — the account the user actually set up, which
+ * carries their opening balance. Postings from the runtime-created duplicates are
+ * re-pointed onto it, and a duplicate is deleted only if it carried no opening balance
+ * and has no postings left. Anything holding real data is left alone rather than merged
+ * on a guess.
+ */
+val MIGRATION_9_10 = object : Migration(9, 10) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE ledgers ADD COLUMN systemCode TEXT")
+
+        // ---- Cash ----
+        db.execSQL(
+            """
+            UPDATE ledgers SET systemCode = 'CASH' WHERE id = (
+                SELECT MIN(id) FROM ledgers
+                 WHERE REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') = 'cashinhand')
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            UPDATE journal_entries
+               SET ledgerId = (SELECT id FROM ledgers WHERE systemCode = 'CASH')
+             WHERE EXISTS (SELECT 1 FROM ledgers WHERE systemCode = 'CASH')
+               AND ledgerId IN (
+                   SELECT id FROM ledgers
+                    WHERE REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') = 'cashinhand'
+                      AND systemCode IS NULL AND openingBalance = 0)
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            DELETE FROM ledgers
+             WHERE REPLACE(REPLACE(LOWER(name), ' ', ''), '-', '') = 'cashinhand'
+               AND systemCode IS NULL AND openingBalance = 0
+               AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.ledgerId = ledgers.id)
+            """.trimIndent()
+        )
+
+        // ---- Bank ----
+        // Older books carry the hardcoded "HDFC Bank Ltd" the posting engine invented;
+        // newer ones carry the neutral seeded "Bank Account". Prefer a real bank-group
+        // ledger, oldest first, so whichever exists is adopted rather than duplicated.
+        db.execSQL(
+            """
+            UPDATE ledgers SET systemCode = 'BANK' WHERE id = (
+                SELECT MIN(l.id) FROM ledgers l
+                  JOIN ledger_groups lg ON l.groupId = lg.id
+                 WHERE REPLACE(REPLACE(LOWER(lg.name), ' ', ''), '-', '') = 'bankaccounts'
+                   AND l.systemCode IS NULL)
+            """.trimIndent()
+        )
+    }
+}
+
 class AccountingTypeConverters {
     @TypeConverter
     fun fromBusinessType(value: BusinessType): String = value.name
@@ -109,7 +175,7 @@ class AccountingTypeConverters {
         CrashLog::class,
         MonthlyArchive::class
     ],
-    version = 9,
+    version = 10,
     exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
@@ -130,7 +196,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "indian_mobile_accounting.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     // Deliberately NOT fallbackToDestructiveMigration(): with it enabled, any
                     // schema bump lacking a matching Migration silently drops every table and
                     // recreates it — destroying the user's books with no warning and no backup.

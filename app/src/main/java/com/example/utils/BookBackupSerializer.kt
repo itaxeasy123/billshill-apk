@@ -118,6 +118,10 @@ object BookBackupSerializer {
                     put("state", l.state)
                     put("country", l.country)
                     put("gstin", l.gstin)
+                    // Without this a restore would drop the CASH/BANK identity, and the
+                    // posting engine would create a fresh duplicate cash ledger — exactly
+                    // the split C2 exists to fix.
+                    put("systemCode", l.systemCode ?: JSONObject.NULL)
                 })
             }
         })
@@ -326,7 +330,10 @@ object BookBackupSerializer {
                     city = o.optString("city", ""),
                     state = o.optString("state", ""),
                     country = o.optString("country", "India"),
-                    gstin = o.optString("gstin", "")
+                    gstin = o.optString("gstin", ""),
+                    // Absent in backups written before ledger identity existed; the
+                    // resolver then adopts by name, so an older backup still restores.
+                    systemCode = if (o.isNull("systemCode")) null else o.optString("systemCode").ifBlank { null }
                 )
             },
             inventoryItems = root.array("inventoryItems") { o ->

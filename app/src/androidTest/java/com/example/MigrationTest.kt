@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.data.db.AppDatabase
 import com.example.data.db.MIGRATION_8_9
+import com.example.data.db.MIGRATION_9_10
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -95,6 +96,84 @@ class MigrationTest {
             c.moveToFirst()
             assertEquals("General Ledgers", c.getString(0))
             assertEquals("EXPENSE", c.getString(1))
+        }
+    }
+
+    /**
+     * 9 → 10 adds `systemCode` and merges the duplicate cash ledger that every
+     * Receipt/Payment/Contra created. The seeded "Cash in Hand" holds the opening
+     * balance; the runtime-created "Cash-in-hand" holds all the movement.
+     */
+    @Test
+    fun migrate9To10_mergesTheDuplicateCashLedger() {
+        helper.createDatabase(dbName, 9).apply {
+            execSQL(
+                "INSERT INTO ledger_groups (id, name, category, parentGroupId) VALUES " +
+                    "(1, 'Cash-in-Hand', 'ASSET', NULL), (2, 'Cash-in-hand', 'ASSET', NULL)"
+            )
+            execSQL(
+                "INSERT INTO ledgers (id, name, groupId, groupName, category, openingBalance, " +
+                    "balanceType, currentBalance, pincode, city, state, country, gstin) VALUES " +
+                    "(10, 'Cash in Hand', 1, 'Cash-in-Hand', 'ASSET', 50000.0, 'DR', 0.0, '', '', '', 'India', ''), " +
+                    "(11, 'Cash-in-hand', 2, 'Cash-in-hand', 'ASSET', 0.0, 'DR', 0.0, '', '', '', 'India', '')"
+            )
+            execSQL(
+                "INSERT INTO vouchers (id, voucherNo, voucherType, date, partyName, totalAmount, " +
+                    "gstAmount, isInterstate, narration, isSynced, tags) VALUES " +
+                    "(1, 'CTR/1', 'CONTRA', 100, 'x', 7000.0, 0.0, 0, '', 0, '')"
+            )
+            execSQL(
+                "INSERT INTO journal_entries (id, voucherId, ledgerId, debitAmount, creditAmount) " +
+                    "VALUES (1, 1, 11, 0.0, 7000.0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 10, true, MIGRATION_9_10)
+
+        // One cash ledger, and it is the one carrying the user's opening balance.
+        db.query(
+            "SELECT id, openingBalance FROM ledgers WHERE REPLACE(REPLACE(LOWER(name),' ',''),'-','') = 'cashinhand'"
+        ).use { c ->
+            assertEquals(1, c.count)
+            c.moveToFirst()
+            assertEquals(10L, c.getLong(0))
+            assertEquals(50000.0, c.getDouble(1), 0.001)
+        }
+        // The duplicate's posting was re-pointed, not dropped.
+        db.query("SELECT ledgerId FROM journal_entries WHERE id = 1").use { c ->
+            c.moveToFirst()
+            assertEquals(10L, c.getLong(0))
+        }
+        db.query("SELECT systemCode FROM ledgers WHERE id = 10").use { c ->
+            c.moveToFirst()
+            assertEquals("CASH", c.getString(0))
+        }
+    }
+
+    /**
+     * A duplicate holding a real opening balance is NOT merged. The migration cannot ask
+     * which account to keep, so anything carrying user data is left for the user to
+     * resolve rather than folded away on a guess.
+     */
+    @Test
+    fun migrate9To10_leavesADuplicateThatHoldsRealData() {
+        helper.createDatabase(dbName, 9).apply {
+            execSQL("INSERT INTO ledger_groups (id, name, category, parentGroupId) VALUES (1, 'Cash-in-Hand', 'ASSET', NULL)")
+            execSQL(
+                "INSERT INTO ledgers (id, name, groupId, groupName, category, openingBalance, " +
+                    "balanceType, currentBalance, pincode, city, state, country, gstin) VALUES " +
+                    "(10, 'Cash in Hand', 1, 'Cash-in-Hand', 'ASSET', 50000.0, 'DR', 0.0, '', '', '', 'India', ''), " +
+                    "(11, 'Cash-in-hand', 1, 'Cash-in-Hand', 'ASSET', 12000.0, 'DR', 0.0, '', '', '', 'India', '')"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 10, true, MIGRATION_9_10)
+
+        db.query("SELECT COUNT(*) FROM ledgers").use { c ->
+            c.moveToFirst()
+            assertEquals("the ledger holding 12,000 must survive", 2, c.getInt(0))
         }
     }
 

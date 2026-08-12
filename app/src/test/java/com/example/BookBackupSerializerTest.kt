@@ -38,7 +38,8 @@ class BookBackupSerializerTest {
         ledgers = listOf(
             LedgerEntity(
                 id = 10, name = "Cash in Hand", groupId = 1, groupName = "Current Assets",
-                category = LedgerCategory.ASSET, openingBalance = 50_000.0, balanceType = BalanceType.DR
+                category = LedgerCategory.ASSET, openingBalance = 50_000.0, balanceType = BalanceType.DR,
+                systemCode = "CASH"
             ),
             LedgerEntity(
                 id = 11, name = "Anand Traders", groupId = 2, groupName = "Sundry Debtors",
@@ -110,6 +111,17 @@ class BookBackupSerializerTest {
         assertEquals("SAL/25-26/1042", v.voucherNo)
         assertEquals(1_760_000_000_000L, v.date)
         assertEquals("urgent,q3", v.tags)
+    }
+
+    @Test
+    fun `ledger system identity survives a restore`() {
+        // Losing this would let the posting engine create a fresh duplicate cash ledger
+        // after a restore — the split C2 exists to fix.
+        val restored = BookBackupSerializer.fromJson(
+            BookBackupSerializer.toJson(sampleBooks(), 0L)
+        )
+        assertEquals("CASH", restored.ledgers.first { it.name == "Cash in Hand" }.systemCode)
+        assertEquals(null, restored.ledgers.first { it.name == "Anand Traders" }.systemCode)
     }
 
     @Test

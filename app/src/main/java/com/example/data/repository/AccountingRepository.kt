@@ -28,6 +28,10 @@ data class BalanceTrendPoint(
     val bankBalance: Double     // running Bank balance at end of this day
 )
 
+/** Stable identities for the ledgers the posting engine must always resolve. */
+const val SYSTEM_LEDGER_CASH = "CASH"
+const val SYSTEM_LEDGER_BANK = "BANK"
+
 class AccountingRepository(private val dao: AccountingDao) {
 
     val userFlow: Flow<UserEntity?> = dao.getUserFlow()
@@ -605,9 +609,9 @@ class AccountingRepository(private val dao: AccountingDao) {
 
             VoucherType.RECEIPT -> {
                 val bankOrCashLedger = if (partyName.lowercase().contains("cash")) {
-                    getLedgerByNameOrCreate("Cash-in-hand", "Cash-in-hand", LedgerCategory.ASSET)
+                    cashLedger()
                 } else {
-                    getLedgerByNameOrCreate("HDFC Bank Ltd", "Bank Accounts", LedgerCategory.ASSET)
+                    bankLedger()
                 }
 
                 // Debit: Bank/Cash
@@ -618,9 +622,9 @@ class AccountingRepository(private val dao: AccountingDao) {
 
             VoucherType.PAYMENT -> {
                 val bankOrCashLedger = if (partyName.lowercase().contains("cash")) {
-                    getLedgerByNameOrCreate("Cash-in-hand", "Cash-in-hand", LedgerCategory.ASSET)
+                    cashLedger()
                 } else {
-                    getLedgerByNameOrCreate("HDFC Bank Ltd", "Bank Accounts", LedgerCategory.ASSET)
+                    bankLedger()
                 }
 
                 // Debit: Vendor / Payee / Asset
@@ -630,8 +634,8 @@ class AccountingRepository(private val dao: AccountingDao) {
             }
 
             VoucherType.CONTRA -> {
-                val cashLedger = getLedgerByNameOrCreate("Cash-in-hand", "Cash-in-hand", LedgerCategory.ASSET)
-                val bankLedger = getLedgerByNameOrCreate("HDFC Bank Ltd", "Bank Accounts", LedgerCategory.ASSET)
+                val cashLedger = cashLedger()
+                val bankLedger = bankLedger()
 
                 if (partyName.lowercase().contains("withdrawal") || partyName.lowercase().contains("cash to bank")) {
                     // Debit Cash, Credit Bank
@@ -687,6 +691,60 @@ class AccountingRepository(private val dao: AccountingDao) {
 
         return getLedgerByNameOrCreate(partyName, defaultGroupName, category)
     }
+
+    /**
+     * Resolves one of the ledgers the posting engine must always be able to find.
+     *
+     * Three steps, in order:
+     *   1. by [code] — the only reliable route once a book has been through the migration;
+     *   2. by loose name (case, spaces and hyphens ignored) — so an existing book adopts
+     *      the cash or bank account it already has instead of gaining a third one;
+     *   3. create it.
+     *
+     * Replaces six hardcoded `getLedgerByNameOrCreate("Cash-in-hand", ...)` /
+     * `("HDFC Bank Ltd", ...)` call sites. The name lookup was exact and
+     * case-sensitive, and never matched the seeded "Cash in Hand", so every Receipt,
+     * Payment and Contra silently created a duplicate cash ledger — and a hardcoded bank
+     * name that had nothing to do with the user's actual bank.
+     */
+    private suspend fun getOrCreateSystemLedger(
+        code: String,
+        defaultName: String,
+        groupName: String,
+        category: LedgerCategory
+    ): LedgerEntity {
+        dao.getLedgerBySystemCode(code)?.let { return it }
+
+        val adopted = dao.getLedgerByLooseName(defaultName)
+        if (adopted != null) {
+            val stamped = adopted.copy(systemCode = code)
+            dao.updateLedger(stamped)
+            return stamped
+        }
+
+        var group = dao.getLedgerGroupByName(groupName)
+        if (group == null) {
+            val groupId = dao.insertLedgerGroup(LedgerGroupEntity(name = groupName, category = category))
+            group = LedgerGroupEntity(id = groupId, name = groupName, category = category)
+        }
+        val id = dao.insertLedger(
+            LedgerEntity(
+                name = defaultName,
+                groupId = group.id,
+                groupName = group.name,
+                category = group.category,
+                balanceType = BalanceType.DR,
+                systemCode = code
+            )
+        )
+        return dao.getLedgerById(id)!!
+    }
+
+    private suspend fun cashLedger(): LedgerEntity =
+        getOrCreateSystemLedger(SYSTEM_LEDGER_CASH, "Cash in Hand", "Cash-in-Hand", LedgerCategory.ASSET)
+
+    private suspend fun bankLedger(): LedgerEntity =
+        getOrCreateSystemLedger(SYSTEM_LEDGER_BANK, "Bank Account", "Bank Accounts", LedgerCategory.ASSET)
 
     private suspend fun getLedgerByNameOrCreate(name: String, groupName: String, category: LedgerCategory): LedgerEntity {
         val existing = dao.getLedgerByName(name)

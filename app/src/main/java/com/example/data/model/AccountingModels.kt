@@ -127,7 +127,17 @@ data class LedgerEntity(
     val city: String = "",
     val state: String = "",
     val country: String = "India",
-    val gstin: String = ""
+    val gstin: String = "",
+    /**
+     * Stable identity for the ledgers the posting engine must always find: "CASH",
+     * "BANK". Resolution used to be by exact, case-sensitive name — and the seed writes
+     * "Cash in Hand" while the repository looks up "Cash-in-hand", which never matches.
+     * Every Receipt, Payment and Contra therefore created a SECOND cash ledger, leaving
+     * the Trial Balance showing one cash account holding the opening balance and another
+     * holding every movement, the latter with a credit balance. A code cannot be
+     * misspelt by a caller.
+     */
+    val systemCode: String? = null
 )
 
 @Entity(tableName = "vouchers")
