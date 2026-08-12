@@ -5,6 +5,7 @@ import android.os.Environment
 import android.util.Log
 import com.example.ai.LocalAiReconciliationEngine
 import com.example.data.db.AppDatabase
+import com.example.utils.GstCalculationService
 import com.example.data.model.VoucherEntity
 import com.example.data.model.VoucherType
 import com.example.utils.TelemetryEngine
@@ -98,6 +99,7 @@ object GstAutomationEngine {
             var invoiceSeqStart = ""
             var invoiceSeqEnd = ""
             var salesInvoiceCount = 0
+            var hsnUnclassifiedCount = 0
 
             salesVouchers.forEachIndexed { index, voucher ->
                 val partyLedger = accountingDao.getLedgerByName(voucher.partyName)
@@ -153,10 +155,15 @@ object GstAutomationEngine {
 
                 val dateStr = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date(voucher.date))
 
+                // The rate the voucher was actually charged at. This was a blanket 18.0
+                // on every line, so a 5% or 28% invoice was reported to the government at
+                // the wrong rate — and the tax amounts beside it then contradicted it.
+                val voucherRate = GstCalculationService.deriveGstRate(voucher.totalAmount, voucher.gstAmount)
+
                 val invItem = Gstr1InvoiceItem(
                     num = 1,
                     itmDet = Gstr1ItmDet(
-                        rt = 18.0,
+                        rt = voucherRate,
                         txval = taxableVal,
                         iamt = split.igst,
                         camt = split.cgst,
@@ -183,7 +190,7 @@ object GstAutomationEngine {
                         Gstr1B2csItem(
                             splyTy = if (isInterstate) "INTER" else "INTRA",
                             pos = posStateCode,
-                            rt = 18.0,
+                            rt = voucherRate,
                             txval = taxableVal,
                             iamt = split.igst,
                             camt = split.cgst,
@@ -193,12 +200,25 @@ object GstAutomationEngine {
                     )
                 }
 
-                // HSN Summary Rollup
-                val hsnCode = "9983" // Default HSN for services/general trade
+                // HSN Summary Rollup — from the item actually sold.
+                // Was hardcoded "9983" (a SAC for professional services) with the
+                // description "General Commercial Supplies", so every sale of every kind
+                // was reported under one classification the business had never chosen.
+                // Table 12 is only meaningful for invoices carrying line items; vouchers
+                // without them are counted and reported instead of being invented.
+                val lineItems = accountingDao.getVoucherItemsForVoucher(voucher.id)
+                val itemMaster = lineItems.firstOrNull()?.let { accountingDao.getInventoryItemById(it.itemId) }
+                val hsnCode = itemMaster?.hsnCode?.trim().orEmpty()
+                if (itemMaster == null || hsnCode.isEmpty()) {
+                    hsnUnclassifiedCount++
+                    return@forEachIndexed
+                }
+                val hsnQty = lineItems.sumOf { it.quantity }
+                val hsnUqc = itemMaster.unit.uppercase(Locale.US).take(3).ifBlank { "NOS" }
                 val existingHsn = hsnMap[hsnCode]
                 if (existingHsn != null) {
                     hsnMap[hsnCode] = existingHsn.copy(
-                        qty = existingHsn.qty + 1.0,
+                        qty = existingHsn.qty + hsnQty,
                         totalVal = existingHsn.totalVal + voucher.totalAmount,
                         txval = existingHsn.txval + taxableVal,
                         iamt = existingHsn.iamt + split.igst,
@@ -209,9 +229,9 @@ object GstAutomationEngine {
                     hsnMap[hsnCode] = Gstr1HsnDetail(
                         num = hsnMap.size + 1,
                         hsnSc = hsnCode,
-                        desc = "General Commercial Supplies",
-                        uqc = "NOS",
-                        qty = 1.0,
+                        desc = itemMaster.name,
+                        uqc = hsnUqc,
+                        qty = hsnQty,
                         totalVal = voucher.totalAmount,
                         txval = taxableVal,
                         iamt = split.igst,
@@ -309,7 +329,10 @@ object GstAutomationEngine {
             )
 
             val itcItem = Gstr3bItcItem(
-                ty = "ALL_OTHER_ITC", // Strict government structural type tag
+                // "OTH" is the value the GSTR-3B schema defines for "All other ITC";
+                // the enum accepts only IMPG / IMPS / ISRC / ISD / OTH. "ALL_OTHER_ITC"
+                // is not one of them, so the payload was rejected on upload.
+                ty = "OTH",
                 iamt = totalPurchaseIgst,
                 camt = totalPurchaseCgst,
                 samt = totalPurchaseSgst,
@@ -355,7 +378,17 @@ object GstAutomationEngine {
 
             // 6. Update SharedPreferences status flag
             val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            val successStatus = "SUCCESS: Exported to $exportFileName on ${SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US).format(Date())}"
+            // The HSN gap is reported, not swallowed. Table 12 can only be built from
+            // invoices carrying line items, and most entry paths write none — saying so
+            // is the difference between an incomplete return and a silently wrong one.
+            val hsnNote = if (hsnUnclassifiedCount > 0) {
+                " | WARNING: $hsnUnclassifiedCount invoice(s) had no stock item, so they are " +
+                    "absent from the HSN summary (Table 12). Add line items to include them."
+            } else ""
+            if (hsnUnclassifiedCount > 0) {
+                Log.w(TAG, "HSN summary incomplete: $hsnUnclassifiedCount invoice(s) carry no line items")
+            }
+            val successStatus = "SUCCESS: Exported to $exportFileName on ${SimpleDateFormat("dd-MM-yyyy HH:mm:ss", Locale.US).format(Date())}$hsnNote"
             prefs.edit().putString(KEY_LAST_EXPORT_STATUS, successStatus).apply()
 
             Result.success(exportFile)
