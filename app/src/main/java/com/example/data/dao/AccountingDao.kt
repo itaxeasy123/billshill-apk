@@ -430,7 +430,9 @@ interface AccountingDao {
      */
     @Query(
         """
-        SELECT l.id AS id, l.name AS name, lg.name AS groupName, lg.category AS category,
+        SELECT l.id AS id, l.name AS name,
+            COALESCE(lg.name, l.groupName) AS groupName,
+            COALESCE(lg.category, l.category) AS category,
             COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.debitAmount ELSE 0 END), 0)
               + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END AS totalDebit,
             COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.creditAmount ELSE 0 END), 0)
@@ -440,14 +442,31 @@ interface AccountingDao {
             - (COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.creditAmount ELSE 0 END), 0)
               + CASE WHEN l.balanceType = 'CR' THEN l.openingBalance ELSE 0 END) AS currentBalance
         FROM ledgers l
-        JOIN ledger_groups lg ON l.groupId = lg.id
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
         LEFT JOIN journal_entries je ON l.id = je.ledgerId
         LEFT JOIN vouchers v ON je.voucherId = v.id
         GROUP BY l.id
-        ORDER BY lg.category, l.name
+        ORDER BY COALESCE(lg.category, l.category), l.name
         """
     )
     fun getBalancesAsOnFlow(asOnMillis: Long): Flow<List<LedgerWithBalance>>
+
+    /**
+     * Ledgers whose group row is missing. Should always be zero.
+     *
+     * Room disables foreign keys during migrations, so a ledger can end up with a
+     * dangling groupId. Such a ledger would silently disappear from the Balance Sheet,
+     * and neither the opening-balance nor the journal-imbalance check would notice —
+     * the sheet would simply be wrong by that ledger's balance.
+     */
+    @Query(
+        """
+        SELECT COUNT(*) FROM ledgers l
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE lg.id IS NULL
+        """
+    )
+    fun getOrphanedLedgerCountFlow(): Flow<Int>
 
     /**
      * Revenue/expense movement within a period.

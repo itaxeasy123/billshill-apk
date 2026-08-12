@@ -11,6 +11,8 @@ import com.example.data.model.*
 import com.example.data.preference.UserSettingsDataStore
 import com.example.data.repository.AccountingRepository
 import com.example.data.repository.BalanceTrendPoint
+import com.example.data.report.BalanceSheet
+import com.example.data.report.ProfitAndLoss
 import com.example.data.sync.FirestoreSyncManager
 import com.example.service.BookBackupStore
 import com.example.service.QuickActionsWidgetProvider
@@ -76,6 +78,35 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
 
     val cashBankTrendState: StateFlow<List<BalanceTrendPoint>> = repository.cashBankTrendFlow(windowDays = 30)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    // ---- Financial statements ----
+    //
+    // Driven by the same _analyticsDateRange the Reports date selector already sets, so
+    // the "STATUTORY DATE RANGE" control finally reaches the Balance Sheet and P&L. It
+    // previously claimed to drive them while only ever reaching the analytics charts.
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val balanceSheetState: StateFlow<BalanceSheet?> =
+        combine(_analyticsDateRange, persistentInventoryMode) { range, inventory -> range to inventory }
+            .flatMapLatest { (range, inventory) ->
+                val (from, to) = range
+                // As-on is the period end: a Balance Sheet is a snapshot, a P&L a movement.
+                repository.balanceSheetFlow(asOnMillis = to, fromMillis = from, toMillis = to, inventoryEnabled = inventory)
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val profitAndLossState: StateFlow<ProfitAndLoss?> =
+        combine(_analyticsDateRange, persistentInventoryMode) { range, inventory -> range to inventory }
+            .flatMapLatest { (range, inventory) ->
+                val (from, to) = range
+                repository.profitAndLossFlow(from, to, inventory)
+            }
+            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** Non-zero means a ledger has a dangling groupId and would vanish from the sheet. */
+    val orphanedLedgerCountState: StateFlow<Int> = repository.orphanedLedgerCountFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
     fun setAnalyticsDateRange(fromMillis: Long, toMillis: Long) {
         val next = fromMillis to toMillis

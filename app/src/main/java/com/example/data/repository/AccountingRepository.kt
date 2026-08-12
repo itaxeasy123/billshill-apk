@@ -6,6 +6,9 @@ import com.example.data.dao.LedgerTxEntry
 import com.example.data.dao.LedgerWithBalance
 import com.example.data.dao.MonthlyPnlRow
 import com.example.data.model.*
+import com.example.data.report.BalanceSheet
+import com.example.data.report.FinancialStatementEngine
+import com.example.data.report.ProfitAndLoss
 import com.example.utils.BookBackupSerializer
 import com.example.utils.FiscalYearUtils
 import com.example.utils.GstCalculationService
@@ -97,6 +100,78 @@ class AccountingRepository(private val dao: AccountingDao) {
             points
         }
     }
+
+    // ---- Financial statements ----
+
+    /**
+     * Stock value at a point in time: current valuation rolled back by the movement
+     * since. Only sees vouchers carrying line items, and values at the cost recorded
+     * when the item was created (avgCostPrice is never recomputed on purchase — H21),
+     * so the figure is captioned in the UI rather than presented as a valuation.
+     */
+    private fun stockValueAsOnFlow(asOnMillis: Long): Flow<Double> =
+        combine(
+            dao.getStockValueAtCostFlow(),
+            dao.getStockMovementValueAfterFlow(asOnMillis)
+        ) { total, movedAfter -> total - movedAfter }
+
+    fun profitAndLossFlow(
+        fromMillis: Long,
+        toMillis: Long,
+        inventoryEnabled: Boolean
+    ): Flow<ProfitAndLoss> =
+        combine(
+            dao.getNominalMovementFlow(fromMillis, toMillis),
+            stockValueAsOnFlow(fromMillis - 1),
+            stockValueAsOnFlow(toMillis)
+        ) { movement, openingStock, closingStock ->
+            FinancialStatementEngine.profitAndLoss(
+                movement = movement,
+                openingStockValue = if (inventoryEnabled) openingStock else 0.0,
+                closingStockValue = if (inventoryEnabled) closingStock else 0.0,
+                inventoryEnabled = inventoryEnabled
+            )
+        }
+
+    /**
+     * The Balance Sheet is an as-on snapshot; the profit it carries is the movement over
+     * the same period the P&L tab shows. Both go through
+     * [FinancialStatementEngine.profitAndLoss], so the two statements cannot disagree
+     * about net profit — there is one computation, rendered twice.
+     */
+    fun balanceSheetFlow(
+        asOnMillis: Long,
+        fromMillis: Long,
+        toMillis: Long,
+        inventoryEnabled: Boolean
+    ): Flow<BalanceSheet> =
+        combine(
+            dao.getBalancesAsOnFlow(asOnMillis),
+            profitAndLossFlow(fromMillis, toMillis, inventoryEnabled),
+            combine(
+                dao.getPriorNominalProfitFlow(fromMillis),
+                dao.getNominalOpeningBalanceFlow()
+            ) { prior, nominalOpening -> prior to nominalOpening },
+            combine(
+                dao.getOpeningBalanceDifferenceFlow(),
+                dao.getJournalImbalanceFlow(asOnMillis)
+            ) { openingDiff, imbalance -> openingDiff to imbalance },
+            stockValueAsOnFlow(asOnMillis)
+        ) { balances, pnl, priors, checks, closingStock ->
+            FinancialStatementEngine.balanceSheet(
+                balances = balances,
+                priorProfit = priors.first,
+                nominalOpeningBalance = priors.second,
+                openingDifference = checks.first,
+                journalImbalance = checks.second,
+                closingStockValue = closingStock,
+                currentPeriodProfit = pnl.nettProfit,
+                inventoryEnabled = inventoryEnabled
+            )
+        }
+
+    /** Should always be zero; non-zero means a ledger has a dangling groupId. */
+    val orphanedLedgerCountFlow: Flow<Int> = dao.getOrphanedLedgerCountFlow()
 
     suspend fun loginWithOtp(phoneNumber: String, otp: String): Boolean {
         // Frictionless OTP verification simulation (accepts any 6 digit OTP e.g. 123456 or auto-verified)
