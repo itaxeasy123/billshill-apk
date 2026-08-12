@@ -23,6 +23,14 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  // Room writes the schema JSON for every version here. Committing these files is
+  // what makes migrations testable: MigrationTestHelper builds an old database from
+  // the recorded schema, runs the migration, and asserts the result matches the new
+  // one. Without them a migration can only be validated by shipping it.
+  ksp { arg("room.schemaLocation", "$projectDir/schemas") }
+
+  sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
+
   signingConfigs {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
@@ -131,6 +139,7 @@ dependencies {
   androidTestImplementation(libs.androidx.espresso.core)
   androidTestImplementation(libs.androidx.junit)
   androidTestImplementation(libs.androidx.runner)
+  androidTestImplementation(libs.androidx.room.testing)
   debugImplementation(libs.androidx.compose.ui.test.manifest)
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)

@@ -81,7 +81,7 @@ class AccountingTypeConverters {
         MonthlyArchive::class
     ],
     version = 8,
-    exportSchema = false
+    exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
 abstract class AppDatabase : RoomDatabase() {
