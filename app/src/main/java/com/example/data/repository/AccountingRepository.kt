@@ -967,19 +967,49 @@ class AccountingRepository(private val dao: AccountingDao) {
         )
     }
 
-    suspend fun createInventoryItem(name: String, unit: String, hsn: String, gstRate: Double, cost: Double, price: Double): Long {
+    /**
+     * Creates a stock item, optionally with the quantity already on the shelf.
+     *
+     * [openingQty] used to be hardcoded to 0.0, so a business could not record the stock
+     * it already held. That is the main reason stock went negative: the first sale of an
+     * existing item had nothing to draw down from.
+     */
+    suspend fun createInventoryItem(
+        name: String,
+        unit: String,
+        hsn: String,
+        gstRate: Double,
+        cost: Double,
+        price: Double,
+        openingQty: Double = 0.0
+    ): Long {
         return dao.insertInventoryItem(
             InventoryItemEntity(
                 name = name,
                 unit = unit,
                 hsnCode = hsn,
                 gstRate = gstRate,
-                stockQty = 0.0,
+                stockQty = openingQty,
                 avgCostPrice = cost,
                 sellingPrice = price
             )
         )
     }
+
+    /**
+     * Items whose recorded quantity has gone below zero.
+     *
+     * Negative stock is deliberately allowed rather than blocked — Tally and Vyapar both
+     * permit it, because businesses genuinely sell before recording the purchase, and
+     * refusing the sale would be worse than recording it. What was wrong is that it
+     * happened SILENTLY: `updateStockQty` is a raw `stockQty = stockQty + :delta` with no
+     * check, so a book could drift negative and nothing anywhere said so.
+     */
+    val negativeStockItemsFlow: Flow<List<InventoryItemEntity>> = dao.getNegativeStockItemsFlow()
+
+    /** Quantity that would remain if [itemId] moved by [delta]; null when unknown. */
+    suspend fun projectedStockAfter(itemId: Long, delta: Double): Double? =
+        dao.getInventoryItemById(itemId)?.let { it.stockQty + delta }
 
     suspend fun getLedgerTransactions(ledgerId: Long): List<LedgerTxEntry> {
         return dao.getLedgerTransactions(ledgerId)

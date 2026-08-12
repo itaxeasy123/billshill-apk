@@ -252,6 +252,16 @@ interface AccountingDao {
     @Query("UPDATE inventory_items SET stockQty = stockQty + :qtyDelta WHERE id = :id")
     suspend fun updateStockQty(id: Long, qtyDelta: Double)
 
+    /**
+     * Items carrying a negative quantity (C9).
+     *
+     * Nothing prevented stock from going below zero and nothing reported it, so a book
+     * could drift silently. Negative stock stays permitted — refusing a sale because the
+     * purchase has not been keyed in yet is worse — but it is now visible.
+     */
+    @Query("SELECT * FROM inventory_items WHERE stockQty < 0 ORDER BY stockQty ASC")
+    fun getNegativeStockItemsFlow(): Flow<List<InventoryItemEntity>>
+
     // Voucher Items
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertVoucherItems(items: List<VoucherItemEntity>)

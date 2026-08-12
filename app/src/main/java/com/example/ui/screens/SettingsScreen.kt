@@ -1120,8 +1120,8 @@ fun SettingsScreen(
     if (showAddItemDialog) {
         AddStockItemDialog(
             onDismiss = { showAddItemDialog = false },
-            onConfirm = { name, unit, hsn, gstRate, cost, price ->
-                viewModel.addInventoryItem(name, unit, hsn, gstRate, cost, price)
+            onConfirm = { name, unit, hsn, gstRate, cost, price, openingQty ->
+                viewModel.addInventoryItem(name, unit, hsn, gstRate, cost, price, openingQty)
                 showAddItemDialog = false
             }
         )
@@ -1706,14 +1706,18 @@ fun GstCertificateModal(
 @Composable
 fun AddStockItemDialog(
     onDismiss: () -> Unit,
-    onConfirm: (String, String, String, String, String, String) -> Unit
+    onConfirm: (String, String, String, String, String, String, String) -> Unit
 ) {
     var name by remember { mutableStateOf("") }
     var unit by remember { mutableStateOf("Pcs") }
-    var hsn by remember { mutableStateOf("8471") }
-    var gstRate by remember { mutableStateOf("18") }
+    // Was prefilled "8471" (computer hardware) and "18" — a plausible HSN code and rate
+    // silently attached to whatever the user was actually creating, and carried into
+    // GST returns from there.
+    var hsn by remember { mutableStateOf("") }
+    var gstRate by remember { mutableStateOf("") }
     var cost by remember { mutableStateOf("") }
     var price by remember { mutableStateOf("") }
+    var openingQty by remember { mutableStateOf("") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1726,11 +1730,22 @@ fun AddStockItemDialog(
                 OutlinedTextField(value = gstRate, onValueChange = { gstRate = it }, label = { Text("GST Rate (%)") }, singleLine = true)
                 OutlinedTextField(value = cost, onValueChange = { cost = it }, label = { Text("Cost Price (₹)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
                 OutlinedTextField(value = price, onValueChange = { price = it }, label = { Text("Selling Price (₹)") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), singleLine = true)
+                // Stock already on the shelf. This field did not exist and the quantity
+                // was hardcoded to zero, so an existing business could not record what it
+                // held — which is why the first sale of any item drove stock negative.
+                OutlinedTextField(
+                    value = openingQty,
+                    onValueChange = { openingQty = it },
+                    label = { Text("Opening Quantity (already in stock)") },
+                    placeholder = { Text("0") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true
+                )
             }
         },
         confirmButton = {
             Button(
-                onClick = { onConfirm(name, unit, hsn, gstRate, cost, price) },
+                onClick = { onConfirm(name, unit, hsn, gstRate, cost, price, openingQty) },
                 colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
             ) {
                 Text("Save Item")

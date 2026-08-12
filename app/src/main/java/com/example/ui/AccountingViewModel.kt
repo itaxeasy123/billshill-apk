@@ -706,7 +706,19 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun addInventoryItem(name: String, unit: String, hsn: String, gstRateText: String, costText: String, priceText: String) {
+    /** Items that have gone below zero quantity — surfaced, not silently tolerated (C9). */
+    val negativeStockItemsState: StateFlow<List<InventoryItemEntity>> = repository.negativeStockItemsFlow
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun addInventoryItem(
+        name: String,
+        unit: String,
+        hsn: String,
+        gstRateText: String,
+        costText: String,
+        priceText: String,
+        openingQtyText: String = "0"
+    ) {
         viewModelScope.launch {
             if (name.isBlank()) {
                 _messageEvent.emit("Item Name is required")
@@ -716,8 +728,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             val cost = costText.toDoubleOrNull() ?: 0.0
             val price = priceText.toDoubleOrNull() ?: 0.0
 
-            repository.createInventoryItem(name.trim(), unit, hsn, gstRate, cost, price)
-            _messageEvent.emit("Stock Item '$name' created!")
+            val openingQty = openingQtyText.toDoubleOrNull() ?: 0.0
+            repository.createInventoryItem(name.trim(), unit, hsn, gstRate, cost, price, openingQty)
+            _messageEvent.emit(
+                if (openingQty > 0) "Stock item '$name' created with $openingQty $unit on hand."
+                else "Stock item '$name' created."
+            )
         }
     }
 

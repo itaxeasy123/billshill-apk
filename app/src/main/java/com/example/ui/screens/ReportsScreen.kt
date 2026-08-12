@@ -102,6 +102,7 @@ fun ReportsScreen(
     val totalSales by viewModel.totalSalesState.collectAsState()
     val totalPurchases by viewModel.totalPurchasesState.collectAsState()
     val inventoryItems by viewModel.inventoryState.collectAsState()
+    val negativeStockItems by viewModel.negativeStockItemsState.collectAsState()
 
     val filteredTrialBalance = trialBalance.filter { item ->
         val matchesQuery = item.name.contains(ledgerSearchQuery, ignoreCase = true) ||
@@ -1198,6 +1199,40 @@ fun ReportsScreen(
 
             // TAB 10: STOCK STATUS REPORT
             10 -> {
+                // Negative stock is allowed (a business genuinely sells before keying in
+                // the purchase, and Tally and Vyapar both permit it) but it must not be
+                // silent — nothing anywhere reported it before.
+                if (negativeStockItems.isNotEmpty()) {
+                    item {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = AccountingRed.copy(alpha = 0.10f),
+                            modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    "${negativeStockItems.size} item(s) show negative stock",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AccountingRed
+                                )
+                                Text(
+                                    "More has been sold than recorded as purchased. Record the " +
+                                        "missing purchase, or set the item's opening quantity.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                negativeStockItems.forEach {
+                                    Text(
+                                        "• ${it.name}: ${it.stockQty} ${it.unit}",
+                                        fontSize = 11.sp,
+                                        color = AccountingRed
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
                 items(inventoryItems) { item ->
                     Card(
                         shape = RoundedCornerShape(24.dp),
@@ -1217,13 +1252,13 @@ fun ReportsScreen(
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = LavenderContainer
+                                    color = if (item.stockQty < 0) AccountingRed.copy(alpha = 0.15f) else LavenderContainer
                                 ) {
                                     Text(
                                         text = "${item.stockQty.toInt()} ${item.unit}",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = RoyalPurplePrimary,
+                                        color = if (item.stockQty < 0) AccountingRed else RoyalPurplePrimary,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                                     )
                                 }
