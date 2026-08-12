@@ -991,12 +991,22 @@ class AccountingRepository(
     ) {
         val existing = dao.getVoucherById(voucherId) ?: return
 
-        // A voucher created through the Manual/Custom form posts to two ledgers the user
-        // named, and records them as "Dr X / Cr Y" in partyName. Re-posting it through
-        // createVoucher's per-type branches would move it to hardcoded accounts and
-        // manufacture a Sundry Debtor called "Dr X / Cr Y" — silently undoing C3. Those
-        // vouchers are amended by re-running the custom posting instead.
-        if (existing.partyName.startsWith("Dr ") && existing.partyName.contains(" / Cr ")) {
+        // A voucher posted against two ledgers the user named — the Manual and Custom
+        // forms — must keep those ledgers. Re-posting it through createVoucher's per-type
+        // branches would move it to hardcoded accounts and manufacture a party ledger
+        // named after the concatenation, silently undoing C3.
+        //
+        // Detected structurally, not by string. An earlier attempt tested
+        // partyName.startsWith("Dr ") — but createCustomVoucher writes "X / Y", not
+        // "Dr X / Cr Y", so it never matched and the guard was inert. A simple two-leg
+        // entry with no tax row is exactly what a manual journal is, and rewriting its
+        // two amounts is the right amendment for it however it was created.
+        val existingLegs = dao.getJournalEntriesForVoucher(voucherId)
+        val isManualTwoLegEntry = existingLegs.size == 2 &&
+            existing.gstAmount == 0.0 &&
+            dao.getGstTaxDetailForVoucher(voucherId) == null &&
+            dao.getVoucherItemsForVoucher(voucherId).isEmpty()
+        if (isManualTwoLegEntry) {
             amendCustomVoucher(existing, amount, narration, dateMillis, tags)
             return
         }
