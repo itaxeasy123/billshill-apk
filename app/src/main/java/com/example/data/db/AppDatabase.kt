@@ -234,6 +234,27 @@ val MIGRATION_12_13 = object : Migration(12, 13) {
                   WHERE je.voucherId = vouchers.id AND l.systemCode IN ('CASH', 'BANK'))
             """.trimIndent()
         )
+
+        // A Contra touches BOTH cash and bank, so the passes above would settle it on
+        // whichever ran last — every existing deposit would have come out as CASH, and
+        // the posting branch reads CASH as "withdrawal". Amending an old bank deposit
+        // would then have reversed it: Dr Cash / Cr Bank instead of Dr Bank / Cr Cash.
+        // For a transfer the mode is where the money ENDED UP, i.e. the debited side.
+        db.execSQL(
+            """
+            UPDATE vouchers SET paymentMode = (
+                SELECT l.systemCode FROM journal_entries je
+                  JOIN ledgers l ON je.ledgerId = l.id
+                 WHERE je.voucherId = vouchers.id AND je.debitAmount > 0
+                   AND l.systemCode IN ('CASH', 'BANK') LIMIT 1)
+             WHERE voucherType = 'CONTRA'
+               AND EXISTS (
+                   SELECT 1 FROM journal_entries je
+                     JOIN ledgers l ON je.ledgerId = l.id
+                    WHERE je.voucherId = vouchers.id AND je.debitAmount > 0
+                      AND l.systemCode IN ('CASH', 'BANK'))
+            """.trimIndent()
+        )
     }
 }
 
