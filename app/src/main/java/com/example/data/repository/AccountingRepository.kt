@@ -380,7 +380,8 @@ class AccountingRepository(private val dao: AccountingDao) {
         breakdown: GstTaxBreakdown,
         selectedItemId: Long?,
         itemQuantity: Double,
-        itemRate: Double
+        itemRate: Double,
+        inventoryEnabled: Boolean
     ) {
         val taxableValue = breakdown.taxableValue
         val totalGstAmount = breakdown.totalGstAmount
@@ -473,26 +474,37 @@ class AccountingRepository(private val dao: AccountingDao) {
             }
 
             VoucherType.PURCHASE -> {
-                val isAssetPurchase = partyName.lowercase().contains("asset") || 
-                        partyName.lowercase().contains("air conditioner") || 
-                        partyName.lowercase().contains("computer") || 
-                        partyName.lowercase().contains("car") || 
-                        partyName.lowercase().contains("furniture") || 
-                        partyName.lowercase().contains("machinery") || 
-                        narration.lowercase().contains("asset")
+                // What was bought decides the debit, not who sold it.
+                //
+                // This used to test the PARTY name for asset words, so buying an air
+                // conditioner from "Carlson Traders" was booked as an expense while
+                // anything at all bought from a vendor called "Car Motors" was booked as
+                // a fixed asset. Worse, the asset ledger was resolved by the party's own
+                // name — and getOrCreatePartyLedger had already created that name as a
+                // LIABILITY under Sundry Creditors, so getLedgerByNameOrCreate found it
+                // and returned it unchanged: the asset was debited into the vendor's
+                // creditor account, which then carried a debit balance and no fixed asset
+                // existed anywhere (H2).
+                val assetWords = listOf("asset", "machinery", "equipment", "furniture", "vehicle", "computer")
+                val isAssetPurchase = assetWords.any { narration.lowercase().contains(it) }
 
                 val destinationLedger = if (isAssetPurchase) {
-                    getLedgerByNameOrCreate(partyName, "Fixed Assets", LedgerCategory.ASSET)
-                } else {
+                    // Named for the thing bought, never for the vendor.
+                    val assetName = narration.trim().ifBlank { "Fixed Asset" }.take(60)
+                    getLedgerByNameOrCreate(assetName, "Fixed Assets", LedgerCategory.ASSET)
+                } else if (inventoryEnabled) {
                     getLedgerByNameOrCreate("Purchase Account", "Purchase Accounts", LedgerCategory.EXPENSE)
+                } else {
+                    // A service business has no Purchase Account — goods-for-resale is not
+                    // a concept it has. Its buying is expense, and routing it through
+                    // Purchase Accounts put it in a Trading Account it should never have.
+                    getLedgerByNameOrCreate("Consumables & Direct Expenses", "Direct Expenses", LedgerCategory.EXPENSE)
                 }
 
-                // Credit: Vendor / Cash / Bank
-                val vendorLedger = if (isAssetPurchase) {
-                    getLedgerByNameOrCreate("Sundry Creditors / Cash", "Sundry Creditors", LedgerCategory.LIABILITY)
-                } else {
-                    partyLedger
-                }
+                // Credit the actual vendor. This used to credit a literal ledger called
+                // "Sundry Creditors / Cash" for asset purchases — an invented account
+                // name that lumped every asset vendor together.
+                val vendorLedger = partyLedger
 
                 journalEntries.add(
                     JournalEntryEntity(voucherId = voucherId, ledgerId = vendorLedger.id, debitAmount = 0.0, creditAmount = amount)
@@ -700,7 +712,11 @@ class AccountingRepository(private val dao: AccountingDao) {
             breakdown = gstBreakdown,
             selectedItemId = selectedItemId,
             itemQuantity = itemQuantity,
-            itemRate = itemRate
+            itemRate = itemRate,
+            // Read once here rather than threaded through 14 call sites: a service
+            // business has no Purchase Account, and routing its buying through one put
+            // the expense inside a Trading Account it should never have had.
+            inventoryEnabled = dao.getUserSync()?.enableInventory ?: true
         )
 
         // 6. Log for Background Sync
@@ -725,14 +741,22 @@ class AccountingRepository(private val dao: AccountingDao) {
         val defaultGroupName = when {
             lower.contains("loan") || lower.contains("borrow") -> "Secured Loans"
             lower.contains("asset") || lower.contains("machinery") || lower.contains("equipment") || lower.contains("furniture") -> "Fixed Assets"
-            voucherType == VoucherType.SALES || voucherType == VoucherType.RECEIPT -> "Sundry Debtors"
-            voucherType == VoucherType.PURCHASE || voucherType == VoucherType.PAYMENT -> "Sundry Creditors"
-            else -> "Sundry Debtors"
+            // A return's counterparty is the same kind of party as the original trade:
+            // a sales return comes back from a customer, a purchase return goes back to a
+            // supplier. Both used to fall through to "Sundry Debtors", so every new
+            // vendor first seen on a purchase return was created as a receivable (H4).
+            voucherType == VoucherType.SALES || voucherType == VoucherType.RECEIPT ||
+                voucherType == VoucherType.SALES_RETURN -> "Sundry Debtors"
+            voucherType == VoucherType.PURCHASE || voucherType == VoucherType.PAYMENT ||
+                voucherType == VoucherType.PURCHASE_RETURN -> "Sundry Creditors"
+            else -> "Suspense A/c"
         }
         val category = when {
             defaultGroupName == "Secured Loans" || defaultGroupName == "Sundry Creditors" -> LedgerCategory.LIABILITY
             defaultGroupName == "Fixed Assets" || defaultGroupName == "Sundry Debtors" -> LedgerCategory.ASSET
-            else -> LedgerCategory.ASSET
+            // Suspense A/c is Tally's own home for a counterparty that cannot yet be
+            // classified — an honest holding place, not a guess at Debtors.
+            else -> LedgerCategory.LIABILITY
         }
 
         return getLedgerByNameOrCreate(partyName, defaultGroupName, category)
@@ -952,7 +976,8 @@ class AccountingRepository(private val dao: AccountingDao) {
             breakdown = breakdown,
             selectedItemId = selectedItemId,
             itemQuantity = itemQuantity,
-            itemRate = 0.0
+            itemRate = 0.0,
+            inventoryEnabled = dao.getUserSync()?.enableInventory ?: true
         )
 
         dao.insertSyncLog(

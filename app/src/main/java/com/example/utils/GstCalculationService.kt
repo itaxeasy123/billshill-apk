@@ -81,8 +81,24 @@ object GstCalculationService {
             )
         }
 
-        val taxableValue = totalAmountInclusive / (1 + (gstRatePercentage / 100.0))
-        val totalGstAmount = totalAmountInclusive - taxableValue
+        // Every component is quantised to paise, and the halves are derived from the
+        // total by residual before quantising, so CGST and SGST reconcile to the GST
+        // amount. Rounding each half independently from the raw value is what let them
+        // disagree with the total by a paisa on odd-paise bases (a Rs 1,000.05 base at
+        // 18% gave halves summing to 180.00 against a total of 180.01), with the missing
+        // paisa going nowhere.
+        //
+        // This also stops raw Doubles like 762.7118644067797 reaching the GSTR JSON,
+        // where every monetary field is capped at two decimal places and anything longer
+        // is rejected by the portal.
+        //
+        // Quantising every component leaves ~1e-13 of binary addition noise in
+        // `taxable + cgst + sgst` vs `gross`. That is deliberate and safe: the
+        // journal-imbalance banner triggers at Rs 0.01, eleven orders of magnitude
+        // above it, and 2dp values are what the statutory schema actually validates.
+        val grossAmount = Money.paise(totalAmountInclusive)
+        val totalGstAmount = Money.paise(grossAmount - grossAmount / (1 + (gstRatePercentage / 100.0)))
+        val taxableValue = Money.paise(grossAmount - totalGstAmount)
 
         val (cgstRate, sgstRate, igstRate) = if (isInterstate) {
             Triple(0.0, 0.0, gstRatePercentage)
@@ -93,11 +109,12 @@ object GstCalculationService {
         val (cgstAmount, sgstAmount, igstAmount) = if (isInterstate) {
             Triple(0.0, 0.0, totalGstAmount)
         } else {
-            Triple(totalGstAmount / 2.0, totalGstAmount / 2.0, 0.0)
+            val cgst = Money.paise(totalGstAmount / 2.0)
+            Triple(cgst, Money.paise(totalGstAmount - cgst), 0.0)
         }
 
         return GstTaxBreakdown(
-            grossAmount = totalAmountInclusive,
+            grossAmount = grossAmount,
             taxableValue = taxableValue,
             totalGstAmount = totalGstAmount,
             gstRatePercentage = gstRatePercentage,

@@ -23,8 +23,16 @@ object IndianFormatter {
     }
 
     private fun formatIndianNumber(value: Double): String {
-        val longVal = value.toLong()
-        val decimalVal = Math.round((value - longVal) * 100)
+        // Quantise ONCE, then split. The rupee part used to truncate while the paise part
+        // rounded, so a value sitting one ulp below an integer produced a rupee digit one
+        // too low AND a paise value of 100 — rendering an exact Rs 19,262.00 as
+        // "19,261.100". Three-digit paise, wrong rupees, on the printed tax invoice.
+        val quantised = java.math.BigDecimal(value.toString())
+            .setScale(2, java.math.RoundingMode.HALF_UP)
+        val longVal = quantised.toBigInteger().toLong()
+        val decimalVal = quantised.subtract(java.math.BigDecimal(longVal))
+            .movePointRight(2)
+            .toLong()
 
         val strVal = longVal.toString()
         val length = strVal.length
