@@ -454,26 +454,71 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         tags: String = ""
     ) {
         viewModelScope.launch {
-            if (debitLedgerName.isBlank() || creditLedgerName.isBlank()) {
+            val debit = debitLedgerName.trim()
+            val credit = creditLedgerName.trim()
+
+            if (debit.isBlank() || credit.isBlank()) {
                 _messageEvent.emit("Both Debit and Credit ledgers are required")
+                return@launch
+            }
+            if (debit.equals(credit, ignoreCase = true)) {
+                // Otherwise this posts Dr X / Cr X — a wash entry that moves nothing while
+                // still balancing, so no report or reconciliation check would ever flag it.
+                _messageEvent.emit("Debit and Credit must be different ledgers")
                 return@launch
             }
             if (amount <= 0) {
                 _messageEvent.emit("Amount must be greater than zero")
                 return@launch
             }
-            repository.createVoucher(
+
+            val dateMillis = parseEntryDate(dateStr)
+            if (dateMillis == null) {
+                _messageEvent.emit("Enter a valid date as YYYY-MM-DD (e.g. ${todayIso()})")
+                return@launch
+            }
+
+            // createCustomVoucher, NOT createVoucher. createVoucher has no credit-ledger
+            // parameter: it used to take the chosen debit name as `partyName` and let its
+            // per-type branches pick both real ledgers, so the user's credit account
+            // survived only as text inside the narration. For JOURNAL and RECEIPT that
+            // went further than ignoring it — the ledger the user chose to DEBIT was the
+            // one that got CREDITED.
+            repository.createCustomVoucher(
                 voucherType = type,
-                partyName = debitLedgerName,
+                debitLedgerName = debit,
+                creditLedgerName = credit,
                 amount = amount,
-                gstRate = 0.0,
-                isInterstate = false,
-                narration = if (narration.isBlank()) "Manual voucher: DR $debitLedgerName, CR $creditLedgerName" else "$narration [DR: $debitLedgerName | CR: $creditLedgerName]",
+                narration = narration,
+                dateMillis = dateMillis,
                 tags = tags
             )
-            _messageEvent.emit("Manual balanced voucher posted successfully!")
+            _messageEvent.emit("Posted: Dr $debit / Cr $credit")
         }
     }
+
+    /**
+     * Strict yyyy-MM-dd parse for manually entered voucher dates; null if unusable.
+     *
+     * `isLenient = false` matters: SimpleDateFormat is lenient by default, so "2026-02-31"
+     * would silently become 3 March and "2026-13-01" January 2027 — posting a voucher to
+     * the wrong day with no error shown.
+     *
+     * Parsed in the device's local zone on purpose. Voucher dates are stored as UTC
+     * millis, but every reporting query converts back with SQLite's 'localtime' and
+     * FiscalYearUtils computes its bounds locally. Local midnight round-trips to the same
+     * calendar day; forcing UTC here would shift the voucher a day earlier in every
+     * report for any device west of UTC.
+     */
+    private fun parseEntryDate(dateStr: String): Long? {
+        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).apply {
+            isLenient = false
+        }
+        return runCatching { fmt.parse(dateStr.trim())?.time }.getOrNull()
+    }
+
+    private fun todayIso(): String =
+        java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).format(java.util.Date())
 
     fun setCloudBackupSettings(context: android.content.Context, enabled: Boolean, frequency: String) {
         viewModelScope.launch {

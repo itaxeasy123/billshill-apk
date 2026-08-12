@@ -63,12 +63,24 @@ fun ManualVoucherDialog(
     // 3. Debit ledger != Credit ledger
     // 4. Narration and Date are non-blank
     val isAmountBalanced = debitAmt > 0.0 && Math.abs(debitAmt - creditAmt) < 0.01
+
+    // Strict parse, matching the ViewModel. isLenient=false is the point: by default
+    // SimpleDateFormat turns "2026-02-31" into 3 March and "2026-13-01" into Jan 2027,
+    // so a blank-check alone let impossible dates through and posted the wrong day.
+    val isDateValid = remember(dateStr) {
+        runCatching {
+            java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH)
+                .apply { isLenient = false }
+                .parse(dateStr.trim())
+        }.getOrNull() != null
+    }
+
     val isFormValid = isAmountBalanced &&
             debitLedgerName.isNotBlank() &&
             creditLedgerName.isNotBlank() &&
-            debitLedgerName != creditLedgerName &&
+            !debitLedgerName.trim().equals(creditLedgerName.trim(), ignoreCase = true) &&
             narration.isNotBlank() &&
-            dateStr.isNotBlank()
+            isDateValid
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -153,7 +165,13 @@ fun ManualVoucherDialog(
                         onValueChange = { debitLedgerName = it },
                         label = { Text("Debit Account (DR)") },
                         shape = RoundedCornerShape(12.dp),
-                        readOnly = false,
+                        // Pick from existing ledgers only. Free text here reached
+                        // getLedgerByNameOrCreate, which creates an unrecognised debit name
+                        // as an EXPENSE under "General Ledgers" and an unrecognised credit
+                        // name as an ASSET under "Cash/Bank Accounts" -- so crediting a new
+                        // "Loan from Director" silently created it as a cash asset with the
+                        // wrong sign, and it stayed wrong on every later report.
+                        readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isDebitDropdownExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth().testTag("manual_debit_ledger_input")
                     )
@@ -200,7 +218,13 @@ fun ManualVoucherDialog(
                         onValueChange = { creditLedgerName = it },
                         label = { Text("Credit Account (CR)") },
                         shape = RoundedCornerShape(12.dp),
-                        readOnly = false,
+                        // Pick from existing ledgers only. Free text here reached
+                        // getLedgerByNameOrCreate, which creates an unrecognised debit name
+                        // as an EXPENSE under "General Ledgers" and an unrecognised credit
+                        // name as an ASSET under "Cash/Bank Accounts" -- so crediting a new
+                        // "Loan from Director" silently created it as a cash asset with the
+                        // wrong sign, and it stayed wrong on every later report.
+                        readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = isCreditDropdownExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth().testTag("manual_credit_ledger_input")
                     )

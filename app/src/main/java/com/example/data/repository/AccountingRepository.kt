@@ -208,12 +208,23 @@ class AccountingRepository(private val dao: AccountingDao) {
         dao.deleteLedgerById(id)
     }
 
+    /**
+     * Posts a voucher against the two ledgers the user actually chose.
+     *
+     * The only generic Dr/Cr poster in the app. [createVoucher]'s per-type branches pick
+     * both ledgers themselves from hardcoded names, which is correct for guided entry
+     * (Sales, Purchase) and wrong for any form where the user names the accounts.
+     *
+     * [dateMillis] and [tags] are defaulted so existing callers are unaffected.
+     */
     suspend fun createCustomVoucher(
         voucherType: VoucherType,
         debitLedgerName: String,
         creditLedgerName: String,
         amount: Double,
-        narration: String = ""
+        narration: String = "",
+        dateMillis: Long = System.currentTimeMillis(),
+        tags: String = ""
     ): Long {
         val debitLedger = getLedgerByNameOrCreate(debitLedgerName, "General Ledgers", LedgerCategory.EXPENSE)
         val creditLedger = getLedgerByNameOrCreate(creditLedgerName, "Cash/Bank Accounts", LedgerCategory.ASSET)
@@ -222,13 +233,14 @@ class AccountingRepository(private val dao: AccountingDao) {
         val voucherEntity = VoucherEntity(
             voucherNo = voucherNo,
             voucherType = voucherType,
-            date = System.currentTimeMillis(),
+            date = dateMillis,
             partyName = "$debitLedgerName / $creditLedgerName",
             totalAmount = amount,
             gstAmount = 0.0,
             isInterstate = false,
             narration = narration.ifBlank { "Dr $debitLedgerName, Cr $creditLedgerName" },
-            isSynced = false
+            isSynced = false,
+            tags = tags
         )
         val voucherId = dao.insertVoucher(voucherEntity)
 
