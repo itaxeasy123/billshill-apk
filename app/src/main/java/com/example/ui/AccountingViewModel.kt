@@ -14,6 +14,7 @@ import com.example.data.repository.BalanceTrendPoint
 import com.example.data.sync.FirestoreSyncManager
 import com.example.service.QuickActionsWidgetProvider
 import com.example.utils.FiscalYearUtils
+import com.example.utils.GstCalculationService
 import com.example.utils.IndianFormatter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -385,7 +386,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         narration: String,
         selectedItemId: Long? = null,
         qtyText: String = "1",
-        tags: String = ""
+        tags: String = "",
+        // Defaults to true because every other entry path (QR scan, bulk import, Tally
+        // XML, quick entry) supplies a bill total that already includes tax. Only the
+        // voucher wizard, which shows the user an Exclusive/Inclusive toggle, passes
+        // the user's actual choice.
+        isGstInclusive: Boolean = true
     ) {
         viewModelScope.launch {
             if (partyName.isBlank()) {
@@ -400,10 +406,14 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             val gstRate = gstRateText.toDoubleOrNull() ?: 18.0
             val qty = qtyText.toDoubleOrNull() ?: 1.0
 
+            // Gross up here, once, at the boundary — the repository and everything
+            // below it treat the amount they receive as tax-inclusive.
+            val grossAmount = GstCalculationService.toGrossAmount(amount, gstRate, isGstInclusive)
+
             repository.createVoucher(
                 voucherType = type,
                 partyName = partyName.trim(),
-                amount = amount,
+                amount = grossAmount,
                 gstRate = gstRate,
                 isInterstate = isInterstate,
                 narration = narration,

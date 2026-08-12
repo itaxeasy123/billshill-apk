@@ -17,6 +17,29 @@ data class GstTaxBreakdown(
 object GstCalculationService {
 
     /**
+     * Normalises a user-entered amount to the GST-inclusive gross value that the whole
+     * posting pipeline downstream assumes.
+     *
+     * Everything below this point — [calculateGstBreakdown], the voucher's stored
+     * totalAmount, the journal legs, and every GST return built from them — treats the
+     * amount it receives as tax-inclusive. When the user enters an Exclusive (base)
+     * amount, it has to be grossed up here, once, before it reaches any of them.
+     *
+     * Skipping this is what made a ₹10,000 + 18% sale post as ₹10,000 total instead of
+     * ₹11,800: taxable ₹8,474.58 and ₹1,525.42 of GST, a 15.25% short-collection on the
+     * app's own default entry path. Both the on-screen preview and the save handler now
+     * call this, so what the user is shown and what gets posted cannot drift apart.
+     */
+    fun toGrossAmount(
+        enteredAmount: Double,
+        gstRatePercentage: Double,
+        isGstInclusive: Boolean
+    ): Double {
+        if (isGstInclusive || gstRatePercentage <= 0.0 || enteredAmount <= 0.0) return enteredAmount
+        return enteredAmount * (1.0 + (gstRatePercentage / 100.0))
+    }
+
+    /**
      * Calculates tax components from total inclusive amount or taxable amount based on interstate state of supply.
      */
     fun calculateGstBreakdown(

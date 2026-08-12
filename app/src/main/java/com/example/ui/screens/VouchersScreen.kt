@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
 import kotlinx.coroutines.launch
 import com.example.utils.CsvExporter
+import com.example.utils.GstCalculationService
 import com.example.utils.IndianFormatter
 import com.example.utils.PdfInvoiceGenerator
 import java.util.Calendar
@@ -168,23 +169,20 @@ fun VouchersScreen(
     var isGstInclusive by remember { mutableStateOf(false) }
     var showGstCalculatorTool by remember { mutableStateOf(false) }
 
-    // Tax calculation preview (Inclusive vs Exclusive)
+    // Tax calculation preview (Inclusive vs Exclusive).
+    // Derived from the same helpers the save handler uses, so the figures shown here
+    // are by construction the figures that get posted. Previously this block computed
+    // the split with its own formula while `addVoucher` ignored `isGstInclusive`
+    // entirely — the preview was right and the stored voucher was wrong.
     val amount = amountText.toDoubleOrNull() ?: 0.0
     val gstRate = selectedGstRate.toDoubleOrNull() ?: 18.0
-    val taxableValue = if (isGstInclusive) {
-        if (gstRate > 0) amount / (1.0 + (gstRate / 100.0)) else amount
-    } else {
-        amount
-    }
-    val gstAmount = if (isGstInclusive) {
-        amount - taxableValue
-    } else {
-        amount * (gstRate / 100.0)
-    }
-    val finalTotalAmount = if (isGstInclusive) amount else (amount + gstAmount)
-    val cgst = if (!isInterstate) gstAmount / 2.0 else 0.0
-    val sgst = if (!isInterstate) gstAmount / 2.0 else 0.0
-    val igst = if (isInterstate) gstAmount else 0.0
+    val finalTotalAmount = GstCalculationService.toGrossAmount(amount, gstRate, isGstInclusive)
+    val previewBreakdown = GstCalculationService.calculateGstBreakdown(finalTotalAmount, gstRate, isInterstate)
+    val taxableValue = previewBreakdown.taxableValue
+    val gstAmount = previewBreakdown.totalGstAmount
+    val cgst = previewBreakdown.cgstAmount
+    val sgst = previewBreakdown.sgstAmount
+    val igst = previewBreakdown.igstAmount
 
     Box(modifier = Modifier.fillMaxSize()) {
         LazyColumn(
@@ -713,7 +711,8 @@ fun VouchersScreen(
                                             narration = narration,
                                             selectedItemId = selectedItem?.id,
                                             qtyText = qtyText,
-                                            tags = tagsText
+                                            tags = tagsText,
+                                            isGstInclusive = isGstInclusive
                                         )
                                         partyName = ""
                                         amountText = ""
