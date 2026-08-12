@@ -225,6 +225,21 @@ fun TallyBalanceSheetView(
             )
             Spacer(Modifier.height(8.dp))
         }
+        // The faces disagreeing is the one thing a Balance Sheet must never do quietly.
+        // `balances` was computed and never rendered, so a genuine mismatch printed two
+        // unequal totals with no explanation. Opening stock entered with no contra
+        // posting is a real way to reach this.
+        if (!sheet.balances) {
+            WarningBanner(
+                "The two sides do not agree: Liabilities " +
+                    IndianFormatter.formatRupee(sheet.liabilitiesTotal) + " vs Assets " +
+                    IndianFormatter.formatRupee(sheet.assetsTotal) + " — a difference of " +
+                    IndianFormatter.formatRupee(abs(sheet.assetsTotal - sheet.liabilitiesTotal)) +
+                    ". Check opening balances and opening stock.",
+                severe = true
+            )
+            Spacer(Modifier.height(8.dp))
+        }
         if (sheet.ungroupedLedgerCount > 0) {
             WarningBanner(
                 "${sheet.ungroupedLedgerCount} ledger(s) marked • are not in a standard group and " +

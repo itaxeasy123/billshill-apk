@@ -104,6 +104,12 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             }
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
+    /** Cash actually in and out over the selected period, from the cash and bank ledgers. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val cashFlowState: StateFlow<Triple<Double, Double, Double>> = _analyticsDateRange
+        .flatMapLatest { (from, to) -> repository.cashFlowFlow(from, to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), Triple(0.0, 0.0, 0.0))
+
     /** Non-zero means a ledger has a dangling groupId and would vanish from the sheet. */
     val orphanedLedgerCountState: StateFlow<Int> = repository.orphanedLedgerCountFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
@@ -190,6 +196,17 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
             com.example.service.LedgerReconciliationWorker
                 .schedulePeriodicReconciliation(getApplication(), enabled)
             if (enabled) triggerAutoReconciliation()
+        }
+
+        // Auto-backup shows ON by default, but the only thing that ever enqueued the
+        // worker was toggling the Settings switch — so a user who never opened Settings
+        // had a switch reading "on" and no job scheduled, and no backups (H18).
+        // enqueueUniquePeriodicWork with KEEP makes this idempotent across launches.
+        viewModelScope.launch {
+            val backupEnabled = userSettingsDataStore.autoCloudBackupFlow.first()
+            val frequency = userSettingsDataStore.backupFrequencyFlow.first()
+            com.example.service.AutoBackupWorker
+                .schedulePeriodicBackup(getApplication(), backupEnabled, frequency, replaceExisting = false)
         }
     }
 
@@ -447,6 +464,8 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         qtyText: String = "1",
         tags: String = "",
         partyGstin: String = "",
+        /** CASH, BANK or CREDIT. Was inferred from the party's name (H3). */
+        paymentMode: String = "CASH",
         // Defaults to true because every other entry path (QR scan, bulk import, Tally
         // XML, quick entry) supplies a bill total that already includes tax. Only the
         // voucher wizard, which shows the user an Exclusive/Inclusive toggle, passes
@@ -480,7 +499,8 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 selectedItemId = selectedItemId,
                 itemQuantity = qty,
                 tags = tags,
-                partyGstin = partyGstin
+                partyGstin = partyGstin,
+                paymentMode = paymentMode
             )
             _messageEvent.emit("Voucher created & debits/credits balanced automatically!")
         }

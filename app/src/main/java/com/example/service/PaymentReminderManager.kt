@@ -18,8 +18,17 @@ data class PaymentReminderItem(
 
 object PaymentReminderManager {
 
-    fun scheduleReminder(context: Context, reminder: PaymentReminderItem) {
-        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager ?: return
+    /**
+     * @return null on success, or the reason the reminder cannot be delivered.
+     *
+     * This used to return Unit and swallow SecurityException, so on Android 12+ without
+     * the exact-alarm grant — or Android 13+ without notification permission — the app
+     * reported the reminder as scheduled and it simply never fired.
+     */
+    fun scheduleReminder(context: Context, reminder: PaymentReminderItem): String? {
+        com.example.utils.ReminderPermissions.blockingReason(context)?.let { return it }
+        val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as? AlarmManager
+            ?: return "This device does not provide an alarm service."
         val intent = Intent(context, PaymentReminderReceiver::class.java).apply {
             putExtra("REMINDER_TITLE", if (reminder.reminderType == "COLLECTION") "Customer Collection Due" else "Vendor Payment Due")
             putExtra("PARTY_NAME", reminder.partyName)
@@ -41,8 +50,10 @@ object PaymentReminderManager {
                 alarmManager.set(AlarmManager.RTC_WAKEUP, reminder.scheduledTimeMillis, pendingIntent)
             }
             Log.d("PaymentReminderManager", "Scheduled reminder ID ${reminder.id} for ${reminder.partyName} at ${reminder.scheduledTimeMillis}")
+            return null
         } catch (e: Exception) {
             Log.e("PaymentReminderManager", "Error scheduling alarm", e)
+            return "Could not schedule the reminder: ${e.message ?: "the system refused the alarm"}"
         }
     }
 

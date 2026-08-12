@@ -57,7 +57,18 @@ class AutoBackupWorker(
             else -> 24L   // DAILY
         }
 
-        fun schedulePeriodicBackup(context: Context, enabled: Boolean, frequency: String = "DAILY") {
+        /**
+         * @param replaceExisting true when the user changed the setting (the new interval
+         *   must take effect), false when called at launch to make sure a job exists.
+         *   Launch uses KEEP so it does not reset an already-scheduled job's next run on
+         *   every app start — with UPDATE, a frequently-opened app might never fire it.
+         */
+        fun schedulePeriodicBackup(
+            context: Context,
+            enabled: Boolean,
+            frequency: String = "DAILY",
+            replaceExisting: Boolean = true
+        ) {
             try {
                 val workManager = WorkManager.getInstance(context)
                 if (enabled) {
@@ -72,7 +83,8 @@ class AutoBackupWorker(
                         .build()
                     workManager.enqueueUniquePeriodicWork(
                         WORK_NAME,
-                        ExistingPeriodicWorkPolicy.UPDATE,
+                        if (replaceExisting) ExistingPeriodicWorkPolicy.UPDATE
+                        else ExistingPeriodicWorkPolicy.KEEP,
                         request
                     )
                 } else {

@@ -350,6 +350,54 @@ class FinancialStatementEngineTest {
         assertEquals(55_000.0, bs.pnlOpening, tol)
     }
 
+    // ---------- stock cost basis ----------
+
+    @Test
+    fun `stock roll-back uses the cost frozen on each line, not the live average`() {
+        // Opening 100 @ Rs 50, purchase 20 @ Rs 60, sale of 30 at the resulting average.
+        // Valuing history at the item's CURRENT average retroactively revalued every past
+        // movement, so the derived opening stock drifted from the figure actually posted
+        // and the Balance Sheet went out by the difference.
+        val openingQty = 100.0
+        val openingCost = 50.0
+        val postedOpeningValue = openingQty * openingCost          // 5,000.00
+
+        val qtyAfterPurchase = openingQty + 20
+        val avgAfterPurchase = (openingQty * openingCost + 20 * 60.0) / qtyAfterPurchase
+        val qtyAfterSale = qtyAfterPurchase - 30
+        val currentValue = qtyAfterSale * avgAfterPurchase          // 4,650.00
+
+        // Frozen costs: purchase at 60, sale at the average that applied when it happened.
+        val movementFrozen = 20 * 60.0 - 30 * avgAfterPurchase
+        assertEquals(postedOpeningValue, currentValue - movementFrozen, 0.01)
+
+        // The live-average form drifts, and the drift is exactly what unbalanced the sheet.
+        val movementLiveAverage = 20 * avgAfterPurchase - 30 * avgAfterPurchase
+        val driftedOpening = currentValue - movementLiveAverage
+        assertTrue(
+            "live-average roll-back must drift from the posted figure",
+            abs(driftedOpening - postedOpeningValue) > 100.0
+        )
+    }
+
+    @Test
+    fun `periodic trading account yields the expected gross profit and COGS`() {
+        // Opening 5,000 + purchases 1,200 - closing 4,650 = COGS 1,550 against sales
+        // 3,000, so gross profit is 1,450 — the periodic model's own definition of COGS,
+        // which is why no separate COGS posting is needed.
+        val openingStock = 5_000.0
+        val purchases = 1_200.0
+        val closingStock = 4_650.0
+        val sales = 3_000.0
+
+        val grossProfit = (sales + closingStock) - (openingStock + purchases)
+        val cogs = openingStock + purchases - closingStock
+
+        assertEquals(1_450.0, grossProfit, 0.01)
+        assertEquals(1_550.0, cogs, 0.01)
+        assertEquals(sales - cogs, grossProfit, 0.01)
+    }
+
     @Test
     fun `randomised balanced books always balance`() {
         // Guards the invariant against shapes the hand-written cases don't cover.

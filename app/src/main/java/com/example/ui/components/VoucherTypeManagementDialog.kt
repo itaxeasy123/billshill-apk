@@ -92,6 +92,7 @@ fun VoucherTypeManagementModal(
                             VoucherType.PAYMENT -> "PAY/25-26/"
                             VoucherType.JOURNAL -> "JRN/25-26/"
                             VoucherType.CONTRA -> "CTR/25-26/"
+                            VoucherType.STOCK_OPENING -> "OPS/25-26/"
                             VoucherType.SALES_RETURN -> "SRN/25-26/"
                             VoucherType.PURCHASE_RETURN -> "PRN/25-26/"
                         }

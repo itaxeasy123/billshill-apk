@@ -11,6 +11,8 @@ enum class BusinessType {
 }
 
 enum class VoucherType {
+    /** Opening stock brought in when an item is created with a quantity already on hand. */
+    STOCK_OPENING,
     SALES,
     PURCHASE,
     RECEIPT,
@@ -22,6 +24,7 @@ enum class VoucherType {
 
     val displayName: String
         get() = when (this) {
+            STOCK_OPENING -> "Opening Stock"
             SALES -> "Sale"
             PURCHASE -> "Purchase"
             RECEIPT -> "Receipt"
@@ -91,7 +94,16 @@ data class UserEntity(
     // Blank, not "ACTIVE": the app has no way to verify GST registration status, and a
     // green ACTIVE badge asserting it is a claim the app cannot support.
     val gstStatus: String = "",
-    val constitutionOfBusiness: String = ""
+    val constitutionOfBusiness: String = "",
+    /**
+     * GST filing scheme. QRMP (Quarterly Return, Monthly Payment) is available to
+     * taxpayers with aggregate turnover up to Rs 5 crore and changes the due dates
+     * entirely — GSTR-1 quarterly on the 13th of the month following the quarter, with
+     * monthly payment via PMT-06 by the 25th, instead of the monthly 11th/20th. The
+     * deadlines shown were hardcoded to the monthly scheme, so a QRMP filer was given
+     * the wrong dates every month (H14).
+     */
+    val filingScheme: String = "MONTHLY"
 )
 
 @Entity(tableName = "ledger_groups")
@@ -152,7 +164,21 @@ data class VoucherEntity(
     val isInterstate: Boolean = false,
     val narration: String = "",
     val isSynced: Boolean = false,
-    val tags: String = ""
+    val tags: String = "",
+    /**
+     * How the voucher settled: CASH, BANK, or CREDIT (on account).
+     *
+     * Whether a Receipt or Payment hit cash or bank was inferred from a SUBSTRING of the
+     * party's name — `partyName.contains("cash")` — so a receipt from "Prakash Traders"
+     * or "Cashmere Textiles" went to the cash drawer, and a genuine cash sale from a
+     * party without the word in their name went to the bank (H3). How a payment was made
+     * is a property of the transaction and cannot be recovered from who it was with.
+     *
+     * Defaults to CASH so existing behaviour is preserved for vouchers that never
+     * recorded one; MIGRATION_12_13 back-derives the real value from the ledger each
+     * voucher actually posted to.
+     */
+    val paymentMode: String = "CASH"
 )
 
 @Entity(
@@ -217,6 +243,18 @@ data class VoucherItemEntity(
     val itemId: Long,
     val quantity: Double,
     val rate: Double,
+    /**
+     * The cost basis of this line at the moment it was posted.
+     *
+     * Historical stock movement was valued at the item's CURRENT `avgCostPrice`, so one
+     * purchase at a different price silently revalued every past movement and the
+     * derived opening-stock figure drifted away from what was actually posted — putting
+     * the Balance Sheet out by the drift. Freezing the cost on the line makes the
+     * roll-back exact at every as-on date.
+     *
+     * Distinct from [rate], which on an outward line is the SELLING price.
+     */
+    val costRate: Double = 0.0,
     val amount: Double,
     val gstRate: Double,
     val cgstAmount: Double = 0.0,

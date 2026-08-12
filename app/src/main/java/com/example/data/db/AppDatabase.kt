@@ -195,6 +195,69 @@ val MIGRATION_10_11 = object : Migration(10, 11) {
     }
 }
 
+/** Adds the GST filing scheme so deadlines can follow QRMP rather than assuming monthly. */
+val MIGRATION_11_12 = object : Migration(11, 12) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE users ADD COLUMN filingScheme TEXT NOT NULL DEFAULT 'MONTHLY'")
+    }
+}
+
+/**
+ * Records how each voucher settled, and back-derives it for existing books.
+ *
+ * The cash-or-bank decision was inferred from a substring of the party's name (H3). The
+ * postings already made that decision, so every existing voucher's real mode can be read
+ * off its own journal entries: whichever of the CASH or BANK system ledgers it touched.
+ * A voucher that touched neither settled on account, i.e. CREDIT.
+ */
+val MIGRATION_12_13 = object : Migration(12, 13) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE vouchers ADD COLUMN paymentMode TEXT NOT NULL DEFAULT 'CASH'")
+
+        listOf("BANK", "CASH").forEach { code ->
+            db.execSQL(
+                """
+                UPDATE vouchers SET paymentMode = '$code'
+                 WHERE EXISTS (
+                     SELECT 1 FROM journal_entries je
+                       JOIN ledgers l ON je.ledgerId = l.id
+                      WHERE je.voucherId = vouchers.id AND l.systemCode = '$code')
+                """.trimIndent()
+            )
+        }
+        db.execSQL(
+            """
+            UPDATE vouchers SET paymentMode = 'CREDIT'
+             WHERE NOT EXISTS (
+                 SELECT 1 FROM journal_entries je
+                   JOIN ledgers l ON je.ledgerId = l.id
+                  WHERE je.voucherId = vouchers.id AND l.systemCode IN ('CASH', 'BANK'))
+            """.trimIndent()
+        )
+    }
+}
+
+/**
+ * Freezes the cost basis on each stock line.
+ *
+ * Historical movement was valued at the item's CURRENT `avgCostPrice`, so a single
+ * purchase at a different price retroactively revalued every past movement — the derived
+ * opening-stock figure drifted from the posted one and the Balance Sheet went out by the
+ * difference. Backfilling to the current average reproduces today's behaviour exactly for
+ * existing rows, so nothing regresses; only future postings become exact.
+ */
+val MIGRATION_13_14 = object : Migration(13, 14) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE voucher_items ADD COLUMN costRate REAL NOT NULL DEFAULT 0")
+        db.execSQL(
+            """
+            UPDATE voucher_items SET costRate = COALESCE(
+                (SELECT i.avgCostPrice FROM inventory_items i WHERE i.id = voucher_items.itemId), 0)
+            """.trimIndent()
+        )
+    }
+}
+
 class AccountingTypeConverters {
     @TypeConverter
     fun fromBusinessType(value: BusinessType): String = value.name
@@ -243,7 +306,7 @@ class AccountingTypeConverters {
         CrashLog::class,
         MonthlyArchive::class
     ],
-    version = 11,
+    version = 14,
     exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
@@ -264,7 +327,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "indian_mobile_accounting.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     // Deliberately NOT fallbackToDestructiveMigration(): with it enabled, any
                     // schema bump lacking a matching Migration silently drops every table and
                     // recreates it — destroying the user's books with no warning and no backup.

@@ -134,10 +134,6 @@ fun DashboardScreen(
     // Tomorrow") to every user on every install.
     val reminderScheduledList = remember { mutableStateListOf<com.example.service.PaymentReminderItem>() }
 
-    var editingVoucher by remember { mutableStateOf<VoucherEntity?>(null) }
-    var editPartyName by remember { mutableStateOf("") }
-    var editAmountText by remember { mutableStateOf("") }
-    var editNarration by remember { mutableStateOf("") }
 
     // Voucher calculations filtered by Fiscal Year
     val filteredVouchers = remember(vouchers, selectedFiscalYear) {
@@ -413,6 +409,7 @@ fun DashboardScreen(
             GstDeadlineNotificationCard(
                 selectedFiscalYear = selectedFiscalYear,
                 onViewFullSchedule = { showGstFilingScheduleModal = true },
+                filingScheme = user.filingScheme,
                 modifier = Modifier.padding(bottom = 12.dp)
             )
 
@@ -909,10 +906,10 @@ fun DashboardScreen(
                 } else {
                     items(salesAndReturnList) { voucher ->
                         VoucherDashboardCard(voucher = voucher) {
-                            editingVoucher = voucher
-                            editPartyName = voucher.partyName
-                            editAmountText = voucher.totalAmount.toString()
-                            editNarration = voucher.narration
+                            // Opens the Vouchers screen, which owns the edit dialog. These four
+                            // handlers used to assign edit state that nothing in this file ever
+                            // read, so tapping a voucher card did nothing at all.
+                            onNavigateToVouchers(voucher.voucherType)
                         }
                     }
                 }
@@ -966,10 +963,10 @@ fun DashboardScreen(
                 } else {
                     items(purchaseAndReturnList) { voucher ->
                         VoucherDashboardCard(voucher = voucher) {
-                            editingVoucher = voucher
-                            editPartyName = voucher.partyName
-                            editAmountText = voucher.totalAmount.toString()
-                            editNarration = voucher.narration
+                            // Opens the Vouchers screen, which owns the edit dialog. These four
+                            // handlers used to assign edit state that nothing in this file ever
+                            // read, so tapping a voucher card did nothing at all.
+                            onNavigateToVouchers(voucher.voucherType)
                         }
                     }
                 }
@@ -1146,10 +1143,10 @@ fun DashboardScreen(
                 } else {
                     items(pettyLogs) { voucher ->
                         VoucherDashboardCard(voucher = voucher) {
-                            editingVoucher = voucher
-                            editPartyName = voucher.partyName
-                            editAmountText = voucher.totalAmount.toString()
-                            editNarration = voucher.narration
+                            // Opens the Vouchers screen, which owns the edit dialog. These four
+                            // handlers used to assign edit state that nothing in this file ever
+                            // read, so tapping a voucher card did nothing at all.
+                            onNavigateToVouchers(voucher.voucherType)
                         }
                     }
                 }
@@ -1159,6 +1156,7 @@ fun DashboardScreen(
             4 -> {
                 item {
                     var reminderPartyName by remember { mutableStateOf("") }
+                    var reminderPermissionIssue by remember { mutableStateOf<String?>(null) }
                     var reminderAmountText by remember { mutableStateOf("") }
                     var reminderType by remember { mutableStateOf("COLLECTION") }
                     var reminderDaysOffset by remember { mutableStateOf(1) }
@@ -1248,6 +1246,30 @@ fun DashboardScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // Says why a reminder could not be scheduled, and offers the
+                            // route to fix it. Both permissions are declared in the manifest
+                            // and were never requested, so the alarm was accepted and then
+                            // silently never delivered.
+                            reminderPermissionIssue?.let { issue ->
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = AccountingRed.copy(alpha = 0.10f),
+                                    modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                                ) {
+                                    Column(modifier = Modifier.padding(12.dp)) {
+                                        Text(issue, fontSize = 11.sp, fontWeight = FontWeight.Bold, color = AccountingRed)
+                                        TextButton(onClick = {
+                                            if (!com.example.utils.ReminderPermissions.hasNotificationPermission(context)) {
+                                                com.example.utils.ReminderPermissions.openAppNotificationSettings(context)
+                                            } else {
+                                                com.example.utils.ReminderPermissions.openExactAlarmSettings(context)
+                                            }
+                                            reminderPermissionIssue = null
+                                        }) { Text("Open settings to allow it", fontSize = 11.sp) }
+                                    }
+                                }
+                            }
+
                             Button(
                                 onClick = {
                                     val amt = reminderAmountText.toDoubleOrNull() ?: 0.0
@@ -1260,11 +1282,20 @@ fun DashboardScreen(
                                             reminderType = reminderType,
                                             scheduledTimeMillis = scheduledTime
                                         )
-                                        com.example.service.PaymentReminderManager.scheduleReminder(context, newItem)
-                                        reminderScheduledList.add(0, newItem)
-
-                                        reminderPartyName = ""
-                                        reminderAmountText = ""
+                                        // Record it as scheduled only if the system actually
+                                        // accepted it. Notifications and exact alarms each
+                                        // need a runtime grant that was never requested, so
+                                        // this reported success while the alarm never fired.
+                                        val failure = com.example.service.PaymentReminderManager
+                                            .scheduleReminder(context, newItem)
+                                        if (failure == null) {
+                                            reminderPermissionIssue = null
+                                            reminderScheduledList.add(0, newItem)
+                                            reminderPartyName = ""
+                                            reminderAmountText = ""
+                                        } else {
+                                            reminderPermissionIssue = failure
+                                        }
                                     }
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = if (reminderType == "COLLECTION") AccountingGreen else AccountingRed),
@@ -1410,10 +1441,10 @@ fun DashboardScreen(
                 } else {
                     items(cashBankList) { voucher ->
                         VoucherDashboardCard(voucher = voucher) {
-                            editingVoucher = voucher
-                            editPartyName = voucher.partyName
-                            editAmountText = voucher.totalAmount.toString()
-                            editNarration = voucher.narration
+                            // Opens the Vouchers screen, which owns the edit dialog. These four
+                            // handlers used to assign edit state that nothing in this file ever
+                            // read, so tapping a voucher card did nothing at all.
+                            onNavigateToVouchers(voucher.voucherType)
                         }
                     }
                 }
@@ -1499,15 +1530,22 @@ fun DashboardScreen(
                     onClick = {
                         val amt = easyAmount.toDoubleOrNull() ?: 0.0
                         if (easyPartyName.isNotBlank() && amt > 0) {
-                            val party = if (easyMode == "CASH") "Cash - $easyPartyName" else easyPartyName
+                            // The party name is no longer mangled to "Cash - <name>".
+                            // That prefix existed purely to trigger the old
+                            // partyName.contains("cash") inference, and it corrupted the
+                            // party ledger's name in the process. The mode is passed
+                            // properly now.
                             val vType = if (easyType == "PAYMENT") VoucherType.PAYMENT else VoucherType.RECEIPT
                             viewModel.addVoucher(
                                 type = vType,
-                                partyName = party,
+                                partyName = easyPartyName,
                                 amountText = amt.toString(),
-                                gstRateText = "18",
+                                // Receipts and payments settle a balance; they do not
+                                // themselves carry GST, and 18% was being applied here.
+                                gstRateText = "0",
                                 isInterstate = false,
-                                narration = "Smart Layperson Entry ($easyMode)"
+                                narration = "Quick entry ($easyMode)",
+                                paymentMode = if (easyMode == "CASH") "CASH" else "BANK"
                             )
                             showEasyEntryModal = false
                         }
@@ -1572,7 +1610,11 @@ fun DashboardScreen(
                                 amountText = amt.toString(),
                                 gstRateText = "0",
                                 isInterstate = false,
-                                narration = "Contra cash transfer"
+                                narration = "Contra cash transfer",
+                                // A deposit ends up in the BANK, a withdrawal in CASH.
+                                // Direction was read from the party text, which meant a
+                                // deposit worded "Cash to Bank" posted backwards.
+                                paymentMode = if (contraDirection == "DEPOSIT") "BANK" else "CASH"
                             )
                             showContraModal = false
                         }
@@ -1673,7 +1715,8 @@ fun DashboardScreen(
     if (showGstFilingScheduleModal) {
         GstFilingScheduleModal(
             selectedFiscalYear = selectedFiscalYear,
-            onDismiss = { showGstFilingScheduleModal = false }
+            onDismiss = { showGstFilingScheduleModal = false },
+            filingScheme = user.filingScheme
         )
     }
 
@@ -2361,7 +2404,20 @@ data class GstDeadline(
     val description: String
 )
 
-fun calculateGstDeadlines(now: java.util.Calendar = java.util.Calendar.getInstance()): List<GstDeadline> {
+/**
+ * @param filingScheme "QRMP" or "MONTHLY". QRMP (turnover up to Rs 5 crore) files GSTR-1
+ *   quarterly by the 13th of the month following the quarter and pays monthly via PMT-06
+ *   by the 25th; the monthly scheme files GSTR-1 by the 11th and GSTR-3B by the 20th.
+ *   The dates were hardcoded to the monthly scheme, so a QRMP filer was shown the wrong
+ *   deadline every single month (H14).
+ */
+fun calculateGstDeadlines(
+    now: java.util.Calendar = java.util.Calendar.getInstance(),
+    filingScheme: String = "MONTHLY"
+): List<GstDeadline> {
+    val isQrmp = filingScheme.equals("QRMP", ignoreCase = true)
+    val gstr1DueDay = if (isQrmp) 13 else 11
+    val gstr3bDueDay = if (isQrmp) 25 else 20
     val currentDay = now.get(java.util.Calendar.DAY_OF_MONTH)
     val currentMonth = now.get(java.util.Calendar.MONTH)
     val monthFormat = java.text.SimpleDateFormat("MMM yyyy", java.util.Locale.ENGLISH)
@@ -2370,12 +2426,16 @@ fun calculateGstDeadlines(now: java.util.Calendar = java.util.Calendar.getInstan
 
     val deadlines = mutableListOf<GstDeadline>()
 
-    // GSTR-1: Due on 11th
+    // GSTR-1 — 11th monthly, or the 13th after each quarter under QRMP.
     val gstr1DueCal = (now.clone() as java.util.Calendar).apply {
-        if (currentDay > 11) {
+        if (currentDay > gstr1DueDay) {
             add(java.util.Calendar.MONTH, 1)
         }
-        set(java.util.Calendar.DAY_OF_MONTH, 11)
+        if (isQrmp) {
+            // Quarter ends Jun/Sep/Dec/Mar; due the 13th of the following month.
+            while (get(java.util.Calendar.MONTH) % 3 != 0) add(java.util.Calendar.MONTH, 1)
+        }
+        set(java.util.Calendar.DAY_OF_MONTH, gstr1DueDay)
         set(java.util.Calendar.HOUR_OF_DAY, 23)
         set(java.util.Calendar.MINUTE, 59)
     }
@@ -2395,10 +2455,10 @@ fun calculateGstDeadlines(now: java.util.Calendar = java.util.Calendar.getInstan
 
     // GSTR-3B: Due on 20th
     val gstr3bDueCal = (now.clone() as java.util.Calendar).apply {
-        if (currentDay > 20) {
+        if (currentDay > gstr3bDueDay) {
             add(java.util.Calendar.MONTH, 1)
         }
-        set(java.util.Calendar.DAY_OF_MONTH, 20)
+        set(java.util.Calendar.DAY_OF_MONTH, gstr3bDueDay)
         set(java.util.Calendar.HOUR_OF_DAY, 23)
         set(java.util.Calendar.MINUTE, 59)
     }
@@ -2449,9 +2509,15 @@ fun calculateGstDeadlines(now: java.util.Calendar = java.util.Calendar.getInstan
 fun GstDeadlineNotificationCard(
     selectedFiscalYear: FiscalYearOption,
     onViewFullSchedule: () -> Unit,
+    filingScheme: String = "MONTHLY",
     modifier: Modifier = Modifier
 ) {
-    val deadlines = remember { calculateGstDeadlines() }
+    // Keyed on the scheme and the current day: `remember {}` with no key froze the
+    // countdown at first composition, so "3 days left" stayed 3 days forever.
+    val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+    val deadlines = remember(filingScheme, today) {
+        calculateGstDeadlines(filingScheme = filingScheme)
+    }
     val urgentCount = deadlines.count { it.daysLeft <= 3 }
 
     Card(
@@ -2598,9 +2664,15 @@ fun GstDeadlineNotificationCard(
 @Composable
 fun GstFilingScheduleModal(
     selectedFiscalYear: FiscalYearOption,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    filingScheme: String = "MONTHLY"
 ) {
-    val deadlines = remember { calculateGstDeadlines() }
+    // Keyed on the scheme and the current day: `remember {}` with no key froze the
+    // countdown at first composition, so "3 days left" stayed 3 days forever.
+    val today = java.util.Calendar.getInstance().get(java.util.Calendar.DAY_OF_YEAR)
+    val deadlines = remember(filingScheme, today) {
+        calculateGstDeadlines(filingScheme = filingScheme)
+    }
     val fyLabel = selectedFiscalYear.label
 
     androidx.compose.ui.window.Dialog(

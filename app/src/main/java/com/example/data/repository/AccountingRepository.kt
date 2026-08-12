@@ -34,6 +34,8 @@ data class BalanceTrendPoint(
 /** Stable identities for the ledgers the posting engine must always resolve. */
 const val SYSTEM_LEDGER_CASH = "CASH"
 const val SYSTEM_LEDGER_BANK = "BANK"
+const val SYSTEM_LEDGER_STOCK = "STOCK"
+const val SYSTEM_LEDGER_OPENING_DIFF = "OPENING_DIFF"
 
 /**
  * @param database optional, and only used to wrap multi-step writes in a single
@@ -198,6 +200,13 @@ class AccountingRepository(
 
     /** Should always be zero; non-zero means a ledger has a dangling groupId. */
     val orphanedLedgerCountFlow: Flow<Int> = dao.getOrphanedLedgerCountFlow()
+
+    /** Genuine cash movement for a period: (in, out, net). */
+    fun cashFlowFlow(fromMillis: Long, toMillis: Long): Flow<Triple<Double, Double, Double>> =
+        combine(
+            dao.getCashInflowFlow(fromMillis, toMillis),
+            dao.getCashOutflowFlow(fromMillis, toMillis)
+        ) { inflow, outflow -> Triple(inflow, outflow, inflow - outflow) }
 
     suspend fun loginWithOtp(phoneNumber: String, otp: String): Boolean {
         // Frictionless OTP verification simulation (accepts any 6 digit OTP e.g. 123456 or auto-verified)
@@ -365,7 +374,10 @@ class AccountingRepository(
             isInterstate = false,
             narration = narration.ifBlank { "Dr $debitLedgerName, Cr $creditLedgerName" },
             isSynced = false,
-            tags = tags
+            tags = tags,
+            // A manual entry settles on the two ledgers the user named — it is not a
+            // cash-or-bank decision, so it carries no settlement mode.
+            paymentMode = "CREDIT"
         )
         val voucherId = dao.insertVoucher(voucherEntity)
 
@@ -402,8 +414,13 @@ class AccountingRepository(
         selectedItemId: Long?,
         itemQuantity: Double,
         itemRate: Double,
+        paymentMode: String,
         inventoryEnabled: Boolean
     ) {
+        // The settlement account comes from the recorded mode, not from guessing at the
+        // party's name. "Prakash Traders" contains "cash" and used to hit the cash drawer.
+        suspend fun settlementLedger(): LedgerEntity =
+            if (paymentMode.equals("BANK", ignoreCase = true)) bankLedger() else cashLedger()
         val taxableValue = breakdown.taxableValue
         val totalGstAmount = breakdown.totalGstAmount
         val cgstAmount = breakdown.cgstAmount
@@ -412,6 +429,41 @@ class AccountingRepository(
         val journalEntries = mutableListOf<JournalEntryEntity>()
 
         when (voucherType) {
+            // Opening stock: Dr Stock-in-Hand / Cr Difference in Opening Balances.
+            // The quantity used to enter inventory with no posting at all, so the value
+            // appeared as a Balance Sheet asset with nothing on the other side — the
+            // sheet was out by exactly the opening stock. "Difference in Opening
+            // Balances" is Tally's own name for this, and the user is meant to clear it
+            // to Capital once they know where it came from; claiming Capital here would
+            // assert something the app does not know.
+            VoucherType.STOCK_OPENING -> {
+                val stockLedger = getOrCreateSystemLedger(
+                    SYSTEM_LEDGER_STOCK, "Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET
+                )
+                val openingDiff = getOrCreateSystemLedger(
+                    SYSTEM_LEDGER_OPENING_DIFF, "Difference in Opening Balances",
+                    "Suspense A/c", LedgerCategory.LIABILITY
+                )
+                journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = stockLedger.id, debitAmount = amount, creditAmount = 0.0))
+                journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = openingDiff.id, debitAmount = 0.0, creditAmount = amount))
+
+                if (selectedItemId != null) {
+                    dao.insertVoucherItems(
+                        listOf(
+                            VoucherItemEntity(
+                                voucherId = voucherId,
+                                itemId = selectedItemId,
+                                quantity = itemQuantity,
+                                rate = itemRate,
+                                costRate = itemRate,
+                                amount = amount,
+                                gstRate = 0.0
+                            )
+                        )
+                    )
+                }
+            }
+
             VoucherType.SALES -> {
                 // Debit: Party or Cash/Bank
                 journalEntries.add(
@@ -442,6 +494,8 @@ class AccountingRepository(
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
                                 rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Cost basis frozen at posting time, so history is not revalued later.
+                                costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
                                 gstRate = gstRate,
                                 cgstAmount = cgstAmount,
@@ -482,6 +536,8 @@ class AccountingRepository(
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
                                 rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Cost basis frozen at posting time, so history is not revalued later.
+                                costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
                                 gstRate = gstRate,
                                 cgstAmount = cgstAmount,
@@ -565,6 +621,8 @@ class AccountingRepository(
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
                                 rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // This receipt's own unit cost, frozen on the line.
+                                costRate = if (itemQuantity > 0) taxableValue / itemQuantity else 0.0,
                                 amount = taxableValue,
                                 gstRate = gstRate,
                                 cgstAmount = cgstAmount,
@@ -613,6 +671,8 @@ class AccountingRepository(
                                 itemId = selectedItemId,
                                 quantity = itemQuantity,
                                 rate = if (itemRate > 0) itemRate else taxableValue / itemQuantity,
+                                // Cost basis frozen at posting time, so history is not revalued later.
+                                costRate = dao.getInventoryItemById(selectedItemId)?.avgCostPrice ?: 0.0,
                                 amount = taxableValue,
                                 gstRate = gstRate,
                                 cgstAmount = cgstAmount,
@@ -626,11 +686,9 @@ class AccountingRepository(
             }
 
             VoucherType.RECEIPT -> {
-                val bankOrCashLedger = if (partyName.lowercase().contains("cash")) {
-                    cashLedger()
-                } else {
-                    bankLedger()
-                }
+                // From the recorded settlement mode, not a substring of the party's
+                // name — "Prakash Traders" and "Cashmere Textiles" both contain "cash".
+                val bankOrCashLedger = settlementLedger()
 
                 // Debit: Bank/Cash
                 journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = bankOrCashLedger.id, debitAmount = amount, creditAmount = 0.0))
@@ -639,11 +697,9 @@ class AccountingRepository(
             }
 
             VoucherType.PAYMENT -> {
-                val bankOrCashLedger = if (partyName.lowercase().contains("cash")) {
-                    cashLedger()
-                } else {
-                    bankLedger()
-                }
+                // From the recorded settlement mode, not a substring of the party's
+                // name — "Prakash Traders" and "Cashmere Textiles" both contain "cash".
+                val bankOrCashLedger = settlementLedger()
 
                 // Debit: Vendor / Payee / Asset
                 journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = partyLedger.id, debitAmount = amount, creditAmount = 0.0))
@@ -659,7 +715,12 @@ class AccountingRepository(
                 // Cr Cash. It was grouped with "withdrawal", which is the opposite
                 // direction, so any Contra whose party text literally read "Cash to Bank"
                 // posted the transfer backwards.
-                val isWithdrawal = partyName.lowercase().let {
+                // CASH means the money ends up in cash — a withdrawal from the bank.
+                // BANK means it ends up in the bank — a deposit. The party text is a
+                // fallback for vouchers created before the mode was recorded.
+                val isWithdrawal = if (paymentMode.equals("CASH", ignoreCase = true)) true
+                else if (paymentMode.equals("BANK", ignoreCase = true)) false
+                else partyName.lowercase().let {
                     it.contains("withdraw") || it.contains("bank to cash") || it.contains("from bank")
                 }
                 if (isWithdrawal) {
@@ -701,7 +762,11 @@ class AccountingRepository(
          * B2C. Recorded on the party's ledger when supplied, so it is remembered for
          * their next invoice too.
          */
-        partyGstin: String = ""
+        partyGstin: String = "",
+        /** CASH, BANK or CREDIT — how the voucher settles. See VoucherEntity.paymentMode. */
+        paymentMode: String = "CASH",
+        /** Overrides the posting date. Opening stock must sit before the year it opens. */
+        dateMillis: Long? = null
     ): Long {
         // 1. Calculate GST components via GstCalculationService
         val gstBreakdown = GstCalculationService.calculateGstBreakdown(
@@ -728,14 +793,15 @@ class AccountingRepository(
         val voucherEntity = VoucherEntity(
             voucherNo = voucherNo,
             voucherType = voucherType,
-            date = System.currentTimeMillis(),
+            date = dateMillis ?: System.currentTimeMillis(),
             partyName = partyName,
             totalAmount = amount,
             gstAmount = totalGstAmount,
             isInterstate = isInterstate,
             narration = narration.ifBlank { "${voucherType.name} entry for $partyName" },
             isSynced = false,
-            tags = tags
+            tags = tags,
+            paymentMode = paymentMode
         )
         val voucherId = dao.insertVoucher(voucherEntity)
 
@@ -771,6 +837,7 @@ class AccountingRepository(
             selectedItemId = selectedItemId,
             itemQuantity = itemQuantity,
             itemRate = itemRate,
+            paymentMode = paymentMode,
             // Read once here rather than threaded through 14 call sites: a service
             // business has no Purchase Account, and routing its buying through one put
             // the expense inside a Trading Account it should never have had.
@@ -884,7 +951,8 @@ class AccountingRepository(
             group = LedgerGroupEntity(id = groupId, name = groupName, category = category)
         }
 
-        val ledgerId = dao.insertLedger(
+        // Resolved and created inside one transaction — see resolveOrCreateLedger.
+        return dao.resolveOrCreateLedger(
             LedgerEntity(
                 name = name,
                 groupId = group.id,
@@ -900,7 +968,6 @@ class AccountingRepository(
                 balanceType = if (category == LedgerCategory.ASSET || category == LedgerCategory.EXPENSE) BalanceType.DR else BalanceType.CR
             )
         )
-        return dao.getLedgerById(ledgerId)!!
     }
 
     /**
@@ -1131,6 +1198,7 @@ class AccountingRepository(
             // Preserve the original per-unit rate instead of forcing
             // taxableValue / quantity, which also produced Infinity at qty 0.
             itemRate = effectiveRate,
+            paymentMode = existing.paymentMode,
             inventoryEnabled = dao.getUserSync()?.enableInventory ?: true
         )
         }
@@ -1163,17 +1231,42 @@ class AccountingRepository(
         price: Double,
         openingQty: Double = 0.0
     ): Long {
-        return dao.insertInventoryItem(
-            InventoryItemEntity(
-                name = name,
-                unit = unit,
-                hsnCode = hsn,
-                gstRate = gstRate,
-                stockQty = openingQty,
-                avgCostPrice = cost,
-                sellingPrice = price
+        return inTransaction {
+            val itemId = dao.insertInventoryItem(
+                InventoryItemEntity(
+                    name = name,
+                    unit = unit,
+                    hsnCode = hsn,
+                    gstRate = gstRate,
+                    stockQty = openingQty,
+                    avgCostPrice = cost,
+                    sellingPrice = price
+                )
             )
-        )
+
+            // Opening stock is posted, not just recorded as a quantity. Writing stockQty
+            // alone put the value on the Balance Sheet's asset face with nothing on the
+            // other side, so the sheet was out by exactly the opening stock's value.
+            //
+            // Dated the last instant BEFORE the current financial year: an as-on report
+            // for any date in the year must see it as opening, and dating it "now" would
+            // make the credit leg vanish from an earlier as-on view while the derived
+            // stock asset stayed — unbalancing it again.
+            if (openingQty > 0.0 && cost > 0.0) {
+                createVoucher(
+                    voucherType = VoucherType.STOCK_OPENING,
+                    partyName = "Opening Stock",
+                    amount = openingQty * cost,
+                    gstRate = 0.0,
+                    narration = "Opening stock: $name",
+                    selectedItemId = itemId,
+                    itemQuantity = openingQty,
+                    itemRate = cost,
+                    dateMillis = FiscalYearUtils.currentFyBounds().first - 1
+                )
+            }
+            itemId
+        }
     }
 
     /**
@@ -1442,6 +1535,7 @@ class AccountingRepository(
     private suspend fun seedMissingConfigAndReserve(voucherType: VoucherType): String {
         val fyShort = FiscalYearUtils.currentFyLabel().removePrefix("FY ")
         val prefix = when (voucherType) {
+            VoucherType.STOCK_OPENING -> "OPS/$fyShort/"
             VoucherType.SALES -> "INV/$fyShort/"
             VoucherType.PURCHASE -> "PUR/$fyShort/"
             VoucherType.RECEIPT -> "REC/$fyShort/"
@@ -1476,7 +1570,7 @@ class AccountingRepository(
 
     private fun stockDirection(type: VoucherType): Double = when (type) {
         VoucherType.SALES, VoucherType.PURCHASE_RETURN -> -1.0
-        VoucherType.PURCHASE, VoucherType.SALES_RETURN -> 1.0
+        VoucherType.PURCHASE, VoucherType.SALES_RETURN, VoucherType.STOCK_OPENING -> 1.0
         else -> 0.0
     }
 }

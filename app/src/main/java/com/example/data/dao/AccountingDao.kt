@@ -223,6 +223,22 @@ interface AccountingDao {
         updateVoucherRow(voucher)
     }
 
+    /**
+     * Resolves a ledger by name, creating it only if absent — atomically.
+     *
+     * The repository did this as a read followed by an insert with no transaction and no
+     * unique index on `ledgers.name`. The XML import launches one coroutine per row and
+     * `addVoucher` suspends at every DAO call, so two rows importing into a fresh book
+     * could each find "Sales Account" missing and each create it — the same TOCTOU shape
+     * that `reserveNextVoucherNumber` was hardened against, left open on the ledger side.
+     */
+    @Transaction
+    suspend fun resolveOrCreateLedger(ledger: LedgerEntity): LedgerEntity {
+        getLedgerByName(ledger.name)?.let { return it }
+        val id = insertLedger(ledger)
+        return getLedgerById(id) ?: ledger.copy(id = id)
+    }
+
     /** Rewrites a manual voucher's amounts against the ledgers it already posts to. */
     @Transaction
     suspend fun amendCustomVoucherAtomic(
@@ -650,6 +666,36 @@ interface AccountingDao {
     fun getBalancesAsOnFlow(asOnMillis: Long): Flow<List<LedgerWithBalance>>
 
     /**
+     * Real cash and bank movement in a period, split into money in and money out.
+     *
+     * The Cash Flow tab classified by voucher-type substring, so "SALES_RETURN" matched
+     * "SALE" and a refund counted as an INFLOW, while a credit sale and the receipt that
+     * settled it were both counted — double-counting the same rupee. Cash flow is not a
+     * property of a voucher's type; it is what actually moved through cash and bank.
+     */
+    @Query(
+        """
+        SELECT COALESCE(SUM(je.debitAmount), 0)
+        FROM journal_entries je
+        JOIN vouchers v ON je.voucherId = v.id
+        JOIN ledgers l ON je.ledgerId = l.id
+        WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+        """
+    )
+    fun getCashInflowFlow(fromMillis: Long, toMillis: Long): Flow<Double>
+
+    @Query(
+        """
+        SELECT COALESCE(SUM(je.creditAmount), 0)
+        FROM journal_entries je
+        JOIN vouchers v ON je.voucherId = v.id
+        JOIN ledgers l ON je.ledgerId = l.id
+        WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+        """
+    )
+    fun getCashOutflowFlow(fromMillis: Long, toMillis: Long): Flow<Double>
+
+    /**
      * Ledgers whose group row is missing. Should always be zero.
      *
      * Room disables foreign keys during migrations, so a ledger can end up with a
@@ -749,18 +795,23 @@ interface AccountingDao {
     /**
      * Value of item movement after a date, used to roll the current stock value back to
      * an as-on date. Only sees vouchers that carry line items.
+     *
+     * Uses the cost FROZEN on each line, not the item's live average. Valuing history at
+     * the current average meant one purchase at a new price retroactively revalued every
+     * past movement, so the derived opening stock drifted from what was actually posted
+     * and the Balance Sheet went out by the drift.
      */
     @Query(
         """
         SELECT COALESCE(SUM(CASE v.voucherType
-            WHEN 'PURCHASE'        THEN  vi.quantity * i.avgCostPrice
-            WHEN 'SALES_RETURN'    THEN  vi.quantity * i.avgCostPrice
-            WHEN 'SALES'           THEN -vi.quantity * i.avgCostPrice
-            WHEN 'PURCHASE_RETURN' THEN -vi.quantity * i.avgCostPrice
+            WHEN 'PURCHASE'        THEN  vi.quantity * vi.costRate
+            WHEN 'SALES_RETURN'    THEN  vi.quantity * vi.costRate
+            WHEN 'STOCK_OPENING'   THEN  vi.quantity * vi.costRate
+            WHEN 'SALES'           THEN -vi.quantity * vi.costRate
+            WHEN 'PURCHASE_RETURN' THEN -vi.quantity * vi.costRate
             ELSE 0 END), 0)
         FROM voucher_items vi
         JOIN vouchers v ON vi.voucherId = v.id
-        JOIN inventory_items i ON vi.itemId = i.id
         WHERE v.date > :asOnMillis
         """
     )

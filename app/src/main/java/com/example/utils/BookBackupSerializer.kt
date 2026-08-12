@@ -85,6 +85,7 @@ object BookBackupSerializer {
                 put("gstRegistrationDate", u.gstRegistrationDate)
                 put("gstStatus", u.gstStatus)
                 put("constitutionOfBusiness", u.constitutionOfBusiness)
+                put("filingScheme", u.filingScheme)
                 put("businessType", u.businessType.name)
                 put("enableInventory", u.enableInventory)
                 put("isLoggedIn", u.isLoggedIn)
@@ -155,6 +156,7 @@ object BookBackupSerializer {
                     put("narration", v.narration)
                     put("isSynced", v.isSynced)
                     put("tags", v.tags)
+                    put("paymentMode", v.paymentMode)
                 })
             }
         })
@@ -179,6 +181,7 @@ object BookBackupSerializer {
                     put("itemId", vi.itemId)
                     put("quantity", vi.quantity)
                     put("rate", vi.rate)
+                    put("costRate", vi.costRate)
                     put("amount", vi.amount)
                     put("gstRate", vi.gstRate)
                     put("cgstAmount", vi.cgstAmount)
@@ -300,6 +303,7 @@ object BookBackupSerializer {
                 gstRegistrationDate = u.optString("gstRegistrationDate", ""),
                 gstStatus = u.optString("gstStatus", ""),
                 constitutionOfBusiness = u.optString("constitutionOfBusiness", ""),
+                filingScheme = u.optString("filingScheme", "MONTHLY"),
                 businessType = enumOrDefault(u.optString("businessType"), BusinessType.TRADING),
                 enableInventory = u.optBoolean("enableInventory", true),
                 isLoggedIn = u.optBoolean("isLoggedIn", true)
@@ -360,7 +364,8 @@ object BookBackupSerializer {
                     isInterstate = o.optBoolean("isInterstate", false),
                     narration = o.optString("narration", ""),
                     isSynced = o.optBoolean("isSynced", false),
-                    tags = o.optString("tags", "")
+                    tags = o.optString("tags", ""),
+                    paymentMode = o.optString("paymentMode", "CASH")
                 )
             },
             journalEntries = root.array("journalEntries") { o ->
@@ -379,6 +384,7 @@ object BookBackupSerializer {
                     itemId = o.getLong("itemId"),
                     quantity = o.optDouble("quantity", 0.0),
                     rate = o.optDouble("rate", 0.0),
+                    costRate = o.optDouble("costRate", 0.0),
                     amount = o.optDouble("amount", 0.0),
                     gstRate = o.optDouble("gstRate", 0.0),
                     cgstAmount = o.optDouble("cgstAmount", 0.0),

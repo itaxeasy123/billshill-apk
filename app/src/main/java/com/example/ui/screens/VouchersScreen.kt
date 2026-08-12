@@ -72,6 +72,8 @@ fun VouchersScreen(
     // The buyer's GSTIN. Nothing captured this before, so GSTR-1 could never identify a
     // B2B supply and every invoice fell into the consumer tables.
     var partyGstin by remember { mutableStateOf("") }
+    // How the money moved. Was inferred from a substring of the party's name (H3).
+    var paymentMode by remember { mutableStateOf("CASH") }
     var amountText by remember { mutableStateOf("") }
     var selectedGstRate by remember { mutableStateOf("18") }
     var isInterstate by remember { mutableStateOf(false) }
@@ -517,6 +519,37 @@ fun VouchersScreen(
 
                             Spacer(modifier = Modifier.height(14.dp))
 
+                            // How the money moved. This decided cash-vs-bank by testing
+                            // whether the PARTY'S NAME contained "cash", so a receipt from
+                            // "Prakash Traders" went to the cash drawer and a genuine cash
+                            // sale from a party without the word went to the bank.
+                            if (selectedVoucherType == VoucherType.RECEIPT ||
+                                selectedVoucherType == VoucherType.PAYMENT ||
+                                selectedVoucherType == VoucherType.CONTRA
+                            ) {
+                                Text(
+                                    if (selectedVoucherType == VoucherType.CONTRA) "Money ends up in:" else "Settled by:",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    listOf("CASH" to "Cash", "BANK" to "Bank").forEach { (mode, label) ->
+                                        FilterChip(
+                                            selected = paymentMode == mode,
+                                            onClick = { paymentMode = mode },
+                                            label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
+                                            colors = FilterChipDefaults.filterChipColors(
+                                                selectedContainerColor = RoyalPurplePrimary,
+                                                selectedLabelColor = Color.White
+                                            ),
+                                            modifier = Modifier.testTag("payment_mode_$mode")
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(14.dp))
+                            }
+
                             // Returns carry GST as well: a credit note reverses the tax it
                             // originally charged, so the rate must be settable on them too.
                             if (selectedVoucherType == VoucherType.SALES ||
@@ -756,10 +789,17 @@ fun VouchersScreen(
                                             qtyText = qtyText,
                                             tags = tagsText,
                                             isGstInclusive = !gstApplies || isGstInclusive,
-                                            partyGstin = partyGstin
+                                            partyGstin = partyGstin,
+                                            // A credit sale settles against the debtor, not
+                                            // cash or bank, so those types carry CREDIT.
+                                            paymentMode = when (selectedVoucherType) {
+                                                VoucherType.RECEIPT, VoucherType.PAYMENT, VoucherType.CONTRA -> paymentMode
+                                                else -> "CREDIT"
+                                            }
                                         )
                                         partyName = ""
                                         partyGstin = ""
+                                        paymentMode = "CASH"
                                         amountText = ""
                                         narration = ""
                                         tagsText = ""
