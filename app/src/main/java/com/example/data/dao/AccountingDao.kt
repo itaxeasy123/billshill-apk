@@ -408,6 +408,147 @@ interface AccountingDao {
     // rows as they actually are, and the inserts below put them back with their IDs
     // intact so every foreign key still resolves.
 
+    // ---- Financial statements (Balance Sheet / Profit & Loss) ----
+    //
+    // A Balance Sheet is an as-on snapshot and a P&L is a between-dates movement.
+    // getTrialBalanceFlow() takes no date bound at all, so building the statements from
+    // it would print lifetime figures under a period heading. These are the date-aware
+    // equivalents.
+    //
+    // No window functions anywhere below: SUM() OVER needs SQLite 3.25+, and minSdk 24
+    // means Android 7 ships 3.9.2. Same constraint the cash/bank trend was written under.
+
+    /**
+     * Per-ledger debit/credit totals as on a date, including opening balances.
+     *
+     * The date filter sits INSIDE `SUM(CASE ...)`, not in the LEFT JOIN's ON clause. In
+     * the ON-clause form a journal row whose voucher is filtered out still survives the
+     * join with a NULL voucher and is summed anyway. The opening balance is added
+     * OUTSIDE the SUM so that `GROUP BY l.id` applies it exactly once — adding it inside
+     * would repeat it per posting, which is the bug that once made a cash ledger with
+     * two postings report 1,01,500 instead of 51,500.
+     */
+    @Query(
+        """
+        SELECT l.id AS id, l.name AS name, lg.name AS groupName, lg.category AS category,
+            COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.debitAmount ELSE 0 END), 0)
+              + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END AS totalDebit,
+            COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.creditAmount ELSE 0 END), 0)
+              + CASE WHEN l.balanceType = 'CR' THEN l.openingBalance ELSE 0 END AS totalCredit,
+            (COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.debitAmount ELSE 0 END), 0)
+              + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END)
+            - (COALESCE(SUM(CASE WHEN v.date <= :asOnMillis THEN je.creditAmount ELSE 0 END), 0)
+              + CASE WHEN l.balanceType = 'CR' THEN l.openingBalance ELSE 0 END) AS currentBalance
+        FROM ledgers l
+        JOIN ledger_groups lg ON l.groupId = lg.id
+        LEFT JOIN journal_entries je ON l.id = je.ledgerId
+        LEFT JOIN vouchers v ON je.voucherId = v.id
+        GROUP BY l.id
+        ORDER BY lg.category, l.name
+        """
+    )
+    fun getBalancesAsOnFlow(asOnMillis: Long): Flow<List<LedgerWithBalance>>
+
+    /**
+     * Revenue/expense movement within a period.
+     *
+     * Inner joins on purpose: a nominal ledger with no movement in the period is absent
+     * rather than a zero row, so the statement renders no empty scaffolding. Opening
+     * balances are excluded because an opening balance carries no date and cannot be
+     * attributed to a period — [getNominalOpeningBalance] surfaces them separately.
+     */
+    @Query(
+        """
+        SELECT l.id AS id, l.name AS name, lg.name AS groupName, lg.category AS category,
+            COALESCE(SUM(je.debitAmount), 0) AS totalDebit,
+            COALESCE(SUM(je.creditAmount), 0) AS totalCredit,
+            COALESCE(SUM(je.debitAmount), 0) - COALESCE(SUM(je.creditAmount), 0) AS currentBalance
+        FROM ledgers l
+        JOIN ledger_groups lg ON l.groupId = lg.id
+        JOIN journal_entries je ON l.id = je.ledgerId
+        JOIN vouchers v ON je.voucherId = v.id
+        WHERE lg.category IN ('REVENUE', 'EXPENSE')
+          AND v.date BETWEEN :fromMillis AND :toMillis
+        GROUP BY l.id
+        ORDER BY lg.category, l.name
+        """
+    )
+    fun getNominalMovementFlow(fromMillis: Long, toMillis: Long): Flow<List<LedgerWithBalance>>
+
+    /** Accumulated profit before the period — the Balance Sheet's P&L A/c opening line. */
+    @Query(
+        """
+        SELECT COALESCE(SUM(je.creditAmount - je.debitAmount), 0)
+        FROM journal_entries je
+        JOIN vouchers v ON je.voucherId = v.id
+        JOIN ledgers l ON je.ledgerId = l.id
+        JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE lg.category IN ('REVENUE', 'EXPENSE') AND v.date < :fromMillis
+        """
+    )
+    fun getPriorNominalProfitFlow(fromMillis: Long): Flow<Double>
+
+    /** Opening balances parked on revenue/expense ledgers — retained earnings from before the app. */
+    @Query(
+        """
+        SELECT COALESCE(SUM(CASE WHEN l.balanceType = 'CR' THEN l.openingBalance
+                                 ELSE -l.openingBalance END), 0)
+        FROM ledgers l JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE lg.category IN ('REVENUE', 'EXPENSE')
+        """
+    )
+    fun getNominalOpeningBalanceFlow(): Flow<Double>
+
+    /**
+     * Net of all opening balances. Non-zero means the user's opening balances disagree.
+     *
+     * Opening balances are written straight onto the ledger row with no contra posting,
+     * so nothing forces them to net to zero. Positive = opening debits exceed credits.
+     * Tally shows this as a "Difference in Opening Balances" line rather than hiding it.
+     */
+    @Query(
+        """
+        SELECT COALESCE(SUM(CASE WHEN balanceType = 'DR' THEN openingBalance
+                                 ELSE -openingBalance END), 0)
+        FROM ledgers
+        """
+    )
+    fun getOpeningBalanceDifferenceFlow(): Flow<Double>
+
+    /** Must be zero. Anything else means the journal itself is corrupt. */
+    @Query(
+        """
+        SELECT COALESCE(SUM(je.debitAmount - je.creditAmount), 0)
+        FROM journal_entries je JOIN vouchers v ON je.voucherId = v.id
+        WHERE v.date <= :asOnMillis
+        """
+    )
+    fun getJournalImbalanceFlow(asOnMillis: Long): Flow<Double>
+
+    /** Stock at recorded cost. Note avgCostPrice is set at item creation and not recomputed (H21). */
+    @Query("SELECT COALESCE(SUM(stockQty * avgCostPrice), 0) FROM inventory_items")
+    fun getStockValueAtCostFlow(): Flow<Double>
+
+    /**
+     * Value of item movement after a date, used to roll the current stock value back to
+     * an as-on date. Only sees vouchers that carry line items.
+     */
+    @Query(
+        """
+        SELECT COALESCE(SUM(CASE v.voucherType
+            WHEN 'PURCHASE'        THEN  vi.quantity * i.avgCostPrice
+            WHEN 'SALES_RETURN'    THEN  vi.quantity * i.avgCostPrice
+            WHEN 'SALES'           THEN -vi.quantity * i.avgCostPrice
+            WHEN 'PURCHASE_RETURN' THEN -vi.quantity * i.avgCostPrice
+            ELSE 0 END), 0)
+        FROM voucher_items vi
+        JOIN vouchers v ON vi.voucherId = v.id
+        JOIN inventory_items i ON vi.itemId = i.id
+        WHERE v.date > :asOnMillis
+        """
+    )
+    fun getStockMovementValueAfterFlow(asOnMillis: Long): Flow<Double>
+
     @Query("SELECT * FROM voucher_items ORDER BY id ASC")
     suspend fun getAllVoucherItemsList(): List<VoucherItemEntity>
 
