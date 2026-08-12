@@ -106,6 +106,14 @@ class GstCalculationServiceTest {
     }
 
     @Test
+    fun `an off-slab rate is reported as-is rather than snapped to a wrong slab`() {
+        // 10,960 total with 960 GST implies 9.6%. Snapping that to 12% would print a rate
+        // on a GST return that contradicts the tax amounts sitting next to it.
+        val derived = GstCalculationService.deriveGstRate(10_960.0, 960.0)
+        assertEquals(9.6, derived, 0.01)
+    }
+
+    @Test
     fun `a zero-rated voucher recovers as zero, not as 18`() {
         assertEquals(0.0, GstCalculationService.deriveGstRate(5_000.0, 0.0), 0.001)
     }

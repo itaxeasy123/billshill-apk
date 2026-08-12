@@ -54,7 +54,13 @@ object GstCalculationService {
         val taxable = totalAmountInclusive - gstAmount
         if (gstAmount <= 0.0 || taxable <= 0.0) return 0.0
         val raw = (gstAmount / taxable) * 100.0
-        return SLABS.minByOrNull { kotlin.math.abs(it - raw) } ?: raw
+        // Snap only when the derived rate is genuinely one of the slabs, allowing for
+        // stored rounding. A voucher whose amounts imply 9.6% is NOT a 12% voucher, and
+        // reporting it as one would put a rate on a GST return that contradicts the tax
+        // amounts printed beside it. Anything that far off is returned as-is so it shows
+        // up as the anomaly it is.
+        val nearest = SLABS.minByOrNull { kotlin.math.abs(it - raw) } ?: raw
+        return if (kotlin.math.abs(nearest - raw) <= 0.05) nearest else raw
     }
 
     /**

@@ -76,6 +76,39 @@ object TallyMargXmlUtil {
             sb.append("            <AMOUNT>${v.totalAmount}</AMOUNT>\n")
             sb.append("            <GSTAMOUNT>${v.gstAmount}</GSTAMOUNT>\n")
             sb.append("            <ISINTERSTATE>${if (v.isInterstate) "YES" else "NO"}</ISINTERSTATE>\n")
+
+            // ALLLEDGERENTRIES.LIST — without these Tally has no debit or credit to post
+            // and rejects the voucher outright, which is why this export could never
+            // actually be imported (H11). Tally's sign convention: negative AMOUNT is a
+            // debit, positive is a credit.
+            val taxable = v.totalAmount - v.gstAmount
+            val partyIsDebit = v.voucherType == VoucherType.SALES || v.voucherType == VoucherType.PURCHASE_RETURN
+            val incomeLedger = when (v.voucherType) {
+                VoucherType.SALES, VoucherType.SALES_RETURN -> "Sales Account"
+                VoucherType.PURCHASE, VoucherType.PURCHASE_RETURN -> "Purchase Account"
+                else -> "Suspense A/c"
+            }
+
+            fun ledgerEntry(name: String, amount: Double, isDebit: Boolean) {
+                sb.append("            <ALLLEDGERENTRIES.LIST>\n")
+                sb.append("              <LEDGERNAME>${xmlEscape(name)}</LEDGERNAME>\n")
+                sb.append("              <ISDEEMEDPOSITIVE>${if (isDebit) "Yes" else "No"}</ISDEEMEDPOSITIVE>\n")
+                sb.append("              <AMOUNT>${if (isDebit) -amount else amount}</AMOUNT>\n")
+                sb.append("            </ALLLEDGERENTRIES.LIST>\n")
+            }
+
+            ledgerEntry(v.partyName, v.totalAmount, partyIsDebit)
+            ledgerEntry(incomeLedger, taxable, !partyIsDebit)
+            if (v.gstAmount > 0) {
+                val side = if (v.voucherType == VoucherType.SALES || v.voucherType == VoucherType.SALES_RETURN) "Output" else "Input"
+                if (v.isInterstate) {
+                    ledgerEntry("$side IGST", v.gstAmount, !partyIsDebit)
+                } else {
+                    val half = v.gstAmount / 2.0
+                    ledgerEntry("$side CGST", half, !partyIsDebit)
+                    ledgerEntry("$side SGST", v.gstAmount - half, !partyIsDebit)
+                }
+            }
             sb.append("          </VOUCHER>\n")
             sb.append("        </TALLYMESSAGE>\n")
         }

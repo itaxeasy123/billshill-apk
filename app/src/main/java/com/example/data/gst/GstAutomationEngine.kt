@@ -107,7 +107,7 @@ object GstAutomationEngine {
 
             // --- GSTR-1 AGGREGATION ---
             val b2bMap = mutableMapOf<String, MutableList<Gstr1Invoice>>()
-            val b2csItems = mutableListOf<Gstr1B2csItem>()
+            val b2csAccumulator = mutableMapOf<Triple<String, String, Double>, Gstr1B2csItem>()
             val hsnMap = mutableMapOf<String, Gstr1HsnDetail>()
 
             var totalSalesTaxable = 0.0
@@ -210,18 +210,24 @@ object GstAutomationEngine {
                     b2bMap.getOrPut(partyGstin) { mutableListOf() }.add(b2bInv)
                 } else {
                     // B2CS Consumer
-                    b2csItems.add(
+                    // Table 7 is an AGGREGATE by place of supply, rate and supply type —
+                    // one row per consumer sale is not the shape the schema expects.
+                    val key = Triple(if (isInterstate) "INTER" else "INTRA", posStateCode, voucherRate)
+                    val prev = b2csAccumulator[key]
+                    b2csAccumulator[key] = if (prev == null) {
                         Gstr1B2csItem(
-                            splyTy = if (isInterstate) "INTER" else "INTRA",
-                            pos = posStateCode,
-                            rt = voucherRate,
-                            txval = taxableVal,
-                            iamt = split.igst,
-                            camt = split.cgst,
-                            samt = split.sgst,
-                            csamt = 0.0
+                            splyTy = key.first, pos = key.second, rt = key.third,
+                            txval = taxableVal, iamt = split.igst,
+                            camt = split.cgst, samt = split.sgst, csamt = 0.0
                         )
-                    )
+                    } else {
+                        prev.copy(
+                            txval = prev.txval + taxableVal,
+                            iamt = prev.iamt + split.igst,
+                            camt = prev.camt + split.cgst,
+                            samt = prev.samt + split.sgst
+                        )
+                    }
                 }
 
                 // HSN Summary Rollup — from the item actually sold.
@@ -296,7 +302,7 @@ object GstAutomationEngine {
                 gt = totalSalesTaxable,
                 curGt = totalSalesTaxable,
                 b2b = b2bGroups,
-                b2cs = b2csItems,
+                b2cs = b2csAccumulator.values.toList(),
                 hsn = Gstr1HsnData(data = hsnMap.values.toList()),
                 docIssue = docSummary
             )
