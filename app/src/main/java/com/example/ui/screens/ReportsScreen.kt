@@ -1444,9 +1444,16 @@ fun ReportsScreen(
                                 type = voucher.voucherType,
                                 partyName = editPartyName,
                                 amountText = editAmountText,
-                                gstRateText = if (voucher.gstAmount > 0) "18" else "0",
+                                // Derived from the voucher's own figures. The literal
+                                // "18"-or-"0" here rewrote every 5%/12%/28% invoice to 18%
+                                // on save. (This dialog did already preserve isInterstate.)
+                                gstRateText = GstCalculationService
+                                    .deriveGstRate(voucher.totalAmount, voucher.gstAmount)
+                                    .let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() },
                                 isInterstate = voucher.isInterstate,
-                                narration = editNarration
+                                narration = editNarration,
+                                dateMillis = voucher.date,
+                                tags = voucher.tags
                             )
                             editingVoucherInStatement = null
                             selectedLedgerForStatement?.let { l ->

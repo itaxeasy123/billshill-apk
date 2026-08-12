@@ -618,32 +618,52 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun deleteVoucher(voucherId: Long, onDeleted: ((VoucherEntity) -> Unit)? = null) {
+    fun deleteVoucher(
+        voucherId: Long,
+        onDeleted: ((AccountingRepository.DeletedVoucherSnapshot) -> Unit)? = null
+    ) {
         viewModelScope.launch {
-            val voucher = vouchersState.value.firstOrNull { it.id == voucherId }
-            repository.deleteVoucher(voucherId)
-            if (voucher != null && onDeleted != null) {
-                onDeleted(voucher)
+            // The snapshot is captured before the delete, so Undo can put the voucher
+            // back verbatim instead of re-posting an approximation of it.
+            val snapshot = repository.deleteVoucher(voucherId)
+            if (snapshot != null && onDeleted != null) {
+                onDeleted(snapshot)
             } else {
                 _messageEvent.emit("Voucher deleted & ledgers/stock updated automatically!")
             }
         }
     }
 
-    fun restoreVoucher(voucher: VoucherEntity) {
+    /**
+     * Puts a deleted voucher back exactly as it was (H26).
+     *
+     * Undo used to re-post through `createVoucher`, which issued a NEW voucher number
+     * while the message claimed to restore the old one, restamped the date to now,
+     * guessed the GST rate as 18-or-0, forced isInterstate false, and dropped tags and
+     * item links. It now replays the captured rows.
+     */
+    fun restoreVoucher(snapshot: AccountingRepository.DeletedVoucherSnapshot) {
         viewModelScope.launch {
-            repository.createVoucher(
-                voucherType = voucher.voucherType,
-                partyName = voucher.partyName,
-                amount = voucher.totalAmount,
-                gstRate = if (voucher.gstAmount > 0) 18.0 else 0.0,
-                isInterstate = false,
-                narration = voucher.narration
-            )
-            _messageEvent.emit("Voucher #${voucher.voucherNo} restored successfully!")
+            try {
+                repository.restoreDeletedVoucher(snapshot)
+                _messageEvent.emit("Voucher ${snapshot.voucher.voucherNo} restored.")
+            } catch (e: Exception) {
+                // journal_entries.ledgerId is ON DELETE RESTRICT, so a ledger deleted in
+                // between makes this fail. Nothing changes; say so rather than pretending.
+                _messageEvent.emit("Could not restore ${snapshot.voucher.voucherNo}: ${e.message ?: "a referenced ledger no longer exists"}")
+            }
         }
     }
 
+    /**
+     * Amends a posted voucher in place.
+     *
+     * No defaults on [gstRateText] or [isInterstate] — the repository dropped its
+     * defaults of 18.0/false deliberately, because a caller that omitted them silently
+     * rewrote a 5% invoice to 18% and converted IGST to CGST+SGST. [amountText] is the
+     * GST-inclusive total, matching what the edit dialog seeds from
+     * `voucher.totalAmount`.
+     */
     fun updateVoucher(
         voucherId: Long,
         type: VoucherType,
@@ -651,7 +671,11 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         amountText: String,
         gstRateText: String,
         isInterstate: Boolean,
-        narration: String
+        narration: String,
+        dateMillis: Long,
+        tags: String,
+        selectedItemId: Long? = null,
+        qtyText: String = "1"
     ) {
         viewModelScope.launch {
             if (partyName.isBlank()) {
@@ -663,18 +687,22 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 _messageEvent.emit("Please enter a valid positive amount")
                 return@launch
             }
-            val gstRate = gstRateText.toDoubleOrNull() ?: 18.0
+            val gstRate = gstRateText.toDoubleOrNull() ?: 0.0
 
-            repository.updateVoucher(
+            repository.amendVoucher(
                 voucherId = voucherId,
                 voucherType = type,
                 partyName = partyName.trim(),
                 amount = amount,
                 gstRate = gstRate,
                 isInterstate = isInterstate,
-                narration = narration
+                narration = narration,
+                dateMillis = dateMillis,
+                tags = tags,
+                selectedItemId = selectedItemId,
+                itemQuantity = qtyText.toDoubleOrNull() ?: 1.0
             )
-            _messageEvent.emit("Voucher updated & ledgers rebalanced automatically!")
+            _messageEvent.emit("Voucher updated; number and date preserved.")
         }
     }
 

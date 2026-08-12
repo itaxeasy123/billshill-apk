@@ -87,6 +87,36 @@ class GstCalculationServiceTest {
         }
     }
 
+    // ---- rate recovery on edit (H5/H26) ----
+
+    @Test
+    fun `the rate a voucher was charged at is recovered, not guessed as 18`() {
+        // Both edit dialogs seeded `if (gstAmount > 0) "18" else "0"`, so opening a 5%
+        // invoice and saving rewrote it to 18% — silently, on a posted voucher.
+        listOf(0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { rate ->
+            val gross = GstCalculationService.toGrossAmount(10_000.0, rate, isGstInclusive = false)
+            val b = GstCalculationService.calculateGstBreakdown(gross, rate, isInterstate = false)
+            assertEquals(
+                "rate recovered for $rate%",
+                rate,
+                GstCalculationService.deriveGstRate(b.grossAmount, b.totalGstAmount),
+                0.001
+            )
+        }
+    }
+
+    @Test
+    fun `a zero-rated voucher recovers as zero, not as 18`() {
+        assertEquals(0.0, GstCalculationService.deriveGstRate(5_000.0, 0.0), 0.001)
+    }
+
+    @Test
+    fun `rate recovery snaps through stored rounding noise`() {
+        // Amounts come back out of SQLite as Doubles; the snap absorbs the drift rather
+        // than producing an unusable 17.999999 rate.
+        assertEquals(18.0, GstCalculationService.deriveGstRate(11_800.004, 1_800.0), 0.001)
+    }
+
     @Test
     fun `empty amount is not grossed up into a phantom value`() {
         assertEquals(0.0, GstCalculationService.toGrossAmount(0.0, 18.0, false), tolerance)

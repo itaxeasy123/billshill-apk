@@ -39,6 +39,24 @@ object GstCalculationService {
         return enteredAmount * (1.0 + (gstRatePercentage / 100.0))
     }
 
+    /** GST slabs an Indian invoice can actually carry, including the 40% de-merit rate. */
+    private val SLABS = listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0)
+
+    /**
+     * Recovers the rate a posted voucher was charged at, from its own stored figures.
+     *
+     * The edit dialogs used to seed `if (gstAmount > 0) "18" else "0"`, so opening any
+     * 5%, 12% or 28% invoice and saving silently rewrote it to 18%. Deriving the rate
+     * and snapping it to the nearest real slab recovers the true value: the arithmetic
+     * is exact by construction, and the snap absorbs stored-Double noise.
+     */
+    fun deriveGstRate(totalAmountInclusive: Double, gstAmount: Double): Double {
+        val taxable = totalAmountInclusive - gstAmount
+        if (gstAmount <= 0.0 || taxable <= 0.0) return 0.0
+        val raw = (gstAmount / taxable) * 100.0
+        return SLABS.minByOrNull { kotlin.math.abs(it - raw) } ?: raw
+    }
+
     /**
      * Calculates tax components from total inclusive amount or taxable amount based on interstate state of supply.
      */

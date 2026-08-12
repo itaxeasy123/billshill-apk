@@ -12,6 +12,7 @@ import com.example.data.report.ProfitAndLoss
 import com.example.utils.BookBackupSerializer
 import com.example.utils.FiscalYearUtils
 import com.example.utils.GstCalculationService
+import com.example.utils.GstTaxBreakdown
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import org.json.JSONArray
@@ -358,67 +359,34 @@ class AccountingRepository(private val dao: AccountingDao) {
     /**
      * Creates a double-entry voucher with automated credit/debit journal balancing and GST splitting.
      */
-    suspend fun createVoucher(
+    /**
+     * Posts a voucher's children: journal lines, inventory movement and line items.
+     *
+     * Extracted from `createVoucher` so `amendVoucher` reuses the identical ledger
+     * resolution and posting rules. Duplicating them is how the three disagreeing GST
+     * classifiers happened; one body, two callers.
+     *
+     * Assumes the caller has already cleared any existing children for [voucherId].
+     */
+    private suspend fun postVoucherChildren(
+        voucherId: Long,
         voucherType: VoucherType,
         partyName: String,
+        partyLedger: LedgerEntity,
         amount: Double,
-        gstRate: Double = 18.0,
-        isInterstate: Boolean = false,
-        narration: String = "",
-        selectedItemId: Long? = null,
-        itemQuantity: Double = 1.0,
-        itemRate: Double = 0.0,
-        tags: String = ""
-    ): Long {
-        // 1. Calculate GST components via GstCalculationService
-        val gstBreakdown = GstCalculationService.calculateGstBreakdown(
-            totalAmountInclusive = amount,
-            gstRatePercentage = gstRate,
-            isInterstate = isInterstate
-        )
-        val taxableValue = gstBreakdown.taxableValue
-        val totalGstAmount = gstBreakdown.totalGstAmount
-        val cgstAmount = gstBreakdown.cgstAmount
-        val sgstAmount = gstBreakdown.sgstAmount
-        val igstAmount = gstBreakdown.igstAmount
-
-        // 2. Ensure Party Ledger exists, or AUTO-CREATE
-        val partyLedger = getOrCreatePartyLedger(partyName, voucherType)
-
-        // 3. Save Voucher header
-        val voucherNo = generateNextVoucherNo(voucherType)
-        val voucherEntity = VoucherEntity(
-            voucherNo = voucherNo,
-            voucherType = voucherType,
-            date = System.currentTimeMillis(),
-            partyName = partyName,
-            totalAmount = amount,
-            gstAmount = totalGstAmount,
-            isInterstate = isInterstate,
-            narration = narration.ifBlank { "${voucherType.name} entry for $partyName" },
-            isSynced = false,
-            tags = tags
-        )
-        val voucherId = dao.insertVoucher(voucherEntity)
-
-        // 4. Save GST Details
-        if (totalGstAmount > 0) {
-            dao.insertGstTaxDetail(
-                GstTaxDetailEntity(
-                    voucherId = voucherId,
-                    isInterstate = isInterstate,
-                    taxableValue = taxableValue,
-                    cgstRate = gstBreakdown.cgstRate,
-                    sgstRate = gstBreakdown.sgstRate,
-                    igstRate = gstBreakdown.igstRate,
-                    cgstAmount = cgstAmount,
-                    sgstAmount = sgstAmount,
-                    igstAmount = igstAmount
-                )
-            )
-        }
-
-        // 5. Generate Double-Entry Journal Lines (Debits = Credits)
+        gstRate: Double,
+        isInterstate: Boolean,
+        narration: String,
+        breakdown: GstTaxBreakdown,
+        selectedItemId: Long?,
+        itemQuantity: Double,
+        itemRate: Double
+    ) {
+        val taxableValue = breakdown.taxableValue
+        val totalGstAmount = breakdown.totalGstAmount
+        val cgstAmount = breakdown.cgstAmount
+        val sgstAmount = breakdown.sgstAmount
+        val igstAmount = breakdown.igstAmount
         val journalEntries = mutableListOf<JournalEntryEntity>()
 
         when (voucherType) {
@@ -656,6 +624,84 @@ class AccountingRepository(private val dao: AccountingDao) {
         }
 
         dao.insertJournalEntries(journalEntries)
+    }
+
+    suspend fun createVoucher(
+        voucherType: VoucherType,
+        partyName: String,
+        amount: Double,
+        gstRate: Double = 18.0,
+        isInterstate: Boolean = false,
+        narration: String = "",
+        selectedItemId: Long? = null,
+        itemQuantity: Double = 1.0,
+        itemRate: Double = 0.0,
+        tags: String = ""
+    ): Long {
+        // 1. Calculate GST components via GstCalculationService
+        val gstBreakdown = GstCalculationService.calculateGstBreakdown(
+            totalAmountInclusive = amount,
+            gstRatePercentage = gstRate,
+            isInterstate = isInterstate
+        )
+        val taxableValue = gstBreakdown.taxableValue
+        val totalGstAmount = gstBreakdown.totalGstAmount
+        val cgstAmount = gstBreakdown.cgstAmount
+        val sgstAmount = gstBreakdown.sgstAmount
+        val igstAmount = gstBreakdown.igstAmount
+
+        // 2. Ensure Party Ledger exists, or AUTO-CREATE
+        val partyLedger = getOrCreatePartyLedger(partyName, voucherType)
+
+        // 3. Save Voucher header
+        val voucherNo = generateNextVoucherNo(voucherType)
+        val voucherEntity = VoucherEntity(
+            voucherNo = voucherNo,
+            voucherType = voucherType,
+            date = System.currentTimeMillis(),
+            partyName = partyName,
+            totalAmount = amount,
+            gstAmount = totalGstAmount,
+            isInterstate = isInterstate,
+            narration = narration.ifBlank { "${voucherType.name} entry for $partyName" },
+            isSynced = false,
+            tags = tags
+        )
+        val voucherId = dao.insertVoucher(voucherEntity)
+
+        // 4. Save GST Details
+        if (totalGstAmount > 0) {
+            dao.insertGstTaxDetail(
+                GstTaxDetailEntity(
+                    voucherId = voucherId,
+                    isInterstate = isInterstate,
+                    taxableValue = taxableValue,
+                    cgstRate = gstBreakdown.cgstRate,
+                    sgstRate = gstBreakdown.sgstRate,
+                    igstRate = gstBreakdown.igstRate,
+                    cgstAmount = cgstAmount,
+                    sgstAmount = sgstAmount,
+                    igstAmount = igstAmount
+                )
+            )
+        }
+
+        // 5. Post the children (journal, items, stock, GST) — shared with amendVoucher
+        //    so the two can never drift apart.
+        postVoucherChildren(
+            voucherId = voucherId,
+            voucherType = voucherType,
+            partyName = partyName,
+            partyLedger = partyLedger,
+            amount = amount,
+            gstRate = gstRate,
+            isInterstate = isInterstate,
+            narration = narration,
+            breakdown = gstBreakdown,
+            selectedItemId = selectedItemId,
+            itemQuantity = itemQuantity,
+            itemRate = itemRate
+        )
 
         // 6. Log for Background Sync
         val syncPayload = JSONObject().apply {
@@ -769,45 +815,155 @@ class AccountingRepository(private val dao: AccountingDao) {
         return dao.getLedgerById(ledgerId)!!
     }
 
-    suspend fun deleteVoucher(voucherId: Long) {
-        val voucher = dao.getVoucherById(voucherId) ?: return
-        val items = dao.getVoucherItemsForVoucher(voucherId)
-        for (item in items) {
-            if (voucher.voucherType == VoucherType.SALES) {
-                dao.updateStockQty(item.itemId, item.quantity) // Restore stock
-            } else if (voucher.voucherType == VoucherType.PURCHASE) {
-                dao.updateStockQty(item.itemId, -item.quantity) // Reverse stock
-            }
-        }
-        dao.deleteJournalEntriesForVoucher(voucherId)
-        dao.deleteVoucherItemsForVoucher(voucherId)
-        dao.deleteGstDetailForVoucher(voucherId)
-        dao.deleteVoucherById(voucherId)
+    /**
+     * Everything needed to put a deleted voucher back exactly as it was.
+     *
+     * Undo used to re-post through `createVoucher`, which issued a NEW voucher number
+     * (while the toast claimed to restore the old one), restamped the date to now,
+     * guessed the GST rate as 18-or-0, forced isInterstate false, and dropped tags and
+     * item links. Capturing the rows before deleting them means the restore reproduces
+     * the voucher rather than approximating it.
+     */
+    data class DeletedVoucherSnapshot(
+        val voucher: VoucherEntity,
+        val journalEntries: List<JournalEntryEntity>,
+        val items: List<VoucherItemEntity>,
+        val gstDetail: GstTaxDetailEntity?
+    )
 
-        val syncPayload = JSONObject().apply {
-            put("voucherId", voucherId)
-            put("action", "DELETE")
-        }.toString()
-        dao.insertSyncLog(SyncLogEntity(action = "DELETE_VOUCHER", payload = syncPayload))
+    /** Deletes a voucher and returns everything needed to undo it. */
+    suspend fun deleteVoucher(voucherId: Long): DeletedVoucherSnapshot? {
+        val voucher = dao.getVoucherById(voucherId) ?: return null
+        val snapshot = DeletedVoucherSnapshot(
+            voucher = voucher,
+            journalEntries = dao.getJournalEntriesForVoucher(voucherId),
+            items = dao.getVoucherItemsForVoucher(voucherId),
+            gstDetail = dao.getGstTaxDetailForVoucher(voucherId)
+        )
+
+        dao.deleteVoucherAtomic(
+            voucherId = voucherId,
+            stockReversals = snapshot.items.map { it.itemId to -stockDirection(voucher.voucherType) * it.quantity }
+        )
+
+        dao.insertSyncLog(
+            SyncLogEntity(
+                action = "DELETE_VOUCHER",
+                payload = JSONObject().apply {
+                    put("voucherId", voucherId)
+                    put("voucherNo", voucher.voucherNo)
+                    put("action", "DELETE")
+                }.toString()
+            )
+        )
+        return snapshot
     }
 
-    suspend fun updateVoucher(
+    /** Puts a deleted voucher back verbatim — same id, number, date, tags and postings. */
+    suspend fun restoreDeletedVoucher(snapshot: DeletedVoucherSnapshot) {
+        dao.restoreVoucherAtomic(
+            voucher = snapshot.voucher,
+            journalEntries = snapshot.journalEntries.map { it.copy(id = 0) },
+            items = snapshot.items.map { it.copy(id = 0) },
+            gstDetail = snapshot.gstDetail?.copy(id = 0),
+            stockDeltas = snapshot.items.map {
+                it.itemId to stockDirection(snapshot.voucher.voucherType) * it.quantity
+            }
+        )
+    }
+
+    /**
+     * Amends a posted voucher in place, preserving its identity.
+     *
+     * Was delete-and-recreate with seven parameters, which meant every edit issued a new
+     * voucher number (leaving a permanent gap in a statutorily consecutive series),
+     * restamped the date to now, wiped tags, destroyed the inventory link, and orphaned
+     * any reconciliation row pointing at the old id. `gstRate` and `isInterstate`
+     * carried defaults of 18.0 and false, so a caller that forgot them silently rewrote
+     * a 5% invoice to 18% and converted IGST to CGST+SGST. Those defaults are gone on
+     * purpose: an incomplete call site is now a compile error.
+     *
+     * [amount] is GST-inclusive gross, the same contract `createVoucher` uses.
+     */
+    suspend fun amendVoucher(
         voucherId: Long,
         voucherType: VoucherType,
         partyName: String,
         amount: Double,
-        gstRate: Double = 18.0,
-        isInterstate: Boolean = false,
-        narration: String = ""
+        gstRate: Double,
+        isInterstate: Boolean,
+        narration: String,
+        dateMillis: Long,
+        tags: String,
+        selectedItemId: Long? = null,
+        itemQuantity: Double = 1.0
     ) {
-        deleteVoucher(voucherId)
-        createVoucher(
+        val existing = dao.getVoucherById(voucherId) ?: return
+        val oldItems = dao.getVoucherItemsForVoucher(voucherId)
+
+        val breakdown = GstCalculationService.calculateGstBreakdown(amount, gstRate, isInterstate)
+        val partyLedger = getOrCreatePartyLedger(partyName, voucherType)
+
+        // Reverse using the OLD voucher's type and quantities. The edit may have changed
+        // the type, and reversing with the new one would move stock the wrong way.
+        val reversals = oldItems.map { it.itemId to -stockDirection(existing.voucherType) * it.quantity }
+
+        dao.clearVoucherChildrenAtomic(
+            voucher = existing.copy(
+                voucherType = voucherType,
+                date = dateMillis,
+                partyName = partyName,
+                totalAmount = amount,
+                gstAmount = breakdown.totalGstAmount,
+                isInterstate = isInterstate,
+                narration = narration.ifBlank { existing.narration },
+                tags = tags,
+                isSynced = false
+            ),
+            stockReversals = reversals
+        )
+
+        // Re-post through the same body createVoucher uses, against the SAME voucher id,
+        // so the amendment cannot drift from a fresh posting.
+        if (breakdown.totalGstAmount > 0) {
+            dao.insertGstTaxDetail(
+                GstTaxDetailEntity(
+                    voucherId = voucherId,
+                    isInterstate = isInterstate,
+                    taxableValue = breakdown.taxableValue,
+                    cgstRate = breakdown.cgstRate,
+                    sgstRate = breakdown.sgstRate,
+                    igstRate = breakdown.igstRate,
+                    cgstAmount = breakdown.cgstAmount,
+                    sgstAmount = breakdown.sgstAmount,
+                    igstAmount = breakdown.igstAmount
+                )
+            )
+        }
+        postVoucherChildren(
+            voucherId = voucherId,
             voucherType = voucherType,
             partyName = partyName,
+            partyLedger = partyLedger,
             amount = amount,
             gstRate = gstRate,
             isInterstate = isInterstate,
-            narration = narration
+            narration = narration,
+            breakdown = breakdown,
+            selectedItemId = selectedItemId,
+            itemQuantity = itemQuantity,
+            itemRate = 0.0
+        )
+
+        dao.insertSyncLog(
+            SyncLogEntity(
+                action = "UPDATE_VOUCHER",
+                payload = JSONObject().apply {
+                    put("voucherId", voucherId)
+                    put("voucherNo", existing.voucherNo)
+                    put("action", "UPDATE")
+                }.toString()
+            )
         )
     }
 
@@ -1055,29 +1211,72 @@ class AccountingRepository(private val dao: AccountingDao) {
         dao.insertOrUpdateVoucherConfig(updated)
     }
 
+    /**
+     * Issues the next voucher number, atomically, skipping any number already in use.
+     *
+     * The counter is reserved inside a transaction (H7) — the previous read-then-write
+     * pair let two concurrent posts issue the same invoice number, which the XML import
+     * triggers deterministically by launching one coroutine per row.
+     *
+     * The skip loop matters because a restore can rewind the counter below numbers that
+     * already exist in the books; without it those numbers would silently duplicate.
+     */
     suspend fun generateNextVoucherNo(voucherType: VoucherType): String {
-        val config = dao.getVoucherConfigByType(voucherType.name)
-        if (config != null) {
-            val prefix = config.prefix
-            val seq = config.nextNumber
-            val formattedSeq = String.format("%04d", seq)
-            if (config.autoIncrement) {
-                dao.insertOrUpdateVoucherConfig(config.copy(nextNumber = seq + 1))
-            }
-            return "$prefix$formattedSeq"
-        } else {
-            val prefix = when (voucherType) {
-                VoucherType.SALES -> "INV/25-26/"
-                VoucherType.PURCHASE -> "PUR/25-26/"
-                VoucherType.RECEIPT -> "REC/25-26/"
-                VoucherType.PAYMENT -> "PAY/25-26/"
-                VoucherType.JOURNAL -> "JRN/25-26/"
-                VoucherType.CONTRA -> "CTR/25-26/"
-                VoucherType.SALES_RETURN -> "SRN/25-26/"
-                VoucherType.PURCHASE_RETURN -> "PRN/25-26/"
-            }
-            val count = dao.getAllVouchersSync().filter { it.voucherType == voucherType }.size + 1001
-            return "$prefix$count"
+        val config = dao.reserveNextVoucherNumber(voucherType.name)
+            ?: return seedMissingConfigAndReserve(voucherType)
+
+        var seq = config.nextNumber
+        var candidate = "${config.prefix}${String.format(Locale.ENGLISH, "%04d", seq)}"
+        // Bounded so a corrupt counter cannot spin forever.
+        var guard = 0
+        while (dao.countVouchersWithNumber(candidate) > 0 && guard < 10_000) {
+            seq += 1
+            candidate = "${config.prefix}${String.format(Locale.ENGLISH, "%04d", seq)}"
+            guard++
         }
+        if (seq != config.nextNumber && config.autoIncrement) {
+            dao.insertOrUpdateVoucherConfig(config.copy(nextNumber = seq + 1))
+        }
+        return candidate
+    }
+
+    /**
+     * Recreates a missing numbering config, then reserves from it.
+     *
+     * Replaces a `COUNT(vouchers) + 1001` fallback, which collides deterministically
+     * after any deletion. The config table can genuinely end up empty: restoring a
+     * truncated backup wipes it and re-inserts only what the snapshot carried.
+     */
+    private suspend fun seedMissingConfigAndReserve(voucherType: VoucherType): String {
+        val fyShort = FiscalYearUtils.currentFyLabel().removePrefix("FY ")
+        val prefix = when (voucherType) {
+            VoucherType.SALES -> "INV/$fyShort/"
+            VoucherType.PURCHASE -> "PUR/$fyShort/"
+            VoucherType.RECEIPT -> "REC/$fyShort/"
+            VoucherType.PAYMENT -> "PAY/$fyShort/"
+            VoucherType.JOURNAL -> "JRN/$fyShort/"
+            VoucherType.CONTRA -> "CTR/$fyShort/"
+            VoucherType.SALES_RETURN -> "SRN/$fyShort/"
+            VoucherType.PURCHASE_RETURN -> "PRN/$fyShort/"
+        }
+        dao.insertOrUpdateVoucherConfig(
+            VoucherTypeConfigEntity(voucherType = voucherType.name, prefix = prefix, nextNumber = 1001)
+        )
+        return generateNextVoucherNo(voucherType)
+    }
+
+    /**
+     * The single source of truth for which way a voucher moves stock.
+     *
+     * Replaces four scattered signs in `createVoucher` and a two-branch check in
+     * `deleteVoucher` that handled only SALES and PURCHASE — so deleting a
+     * SALES_RETURN or PURCHASE_RETURN never reversed its stock movement at all (H6),
+     * leaving quantity permanently wrong while the valuation query, which does handle
+     * all four types, disagreed with it.
+     */
+    private fun stockDirection(type: VoucherType): Double = when (type) {
+        VoucherType.SALES, VoucherType.PURCHASE_RETURN -> -1.0
+        VoucherType.PURCHASE, VoucherType.SALES_RETURN -> 1.0
+        else -> 0.0
     }
 }

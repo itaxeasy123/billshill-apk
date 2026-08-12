@@ -94,6 +94,8 @@ fun VouchersScreen(
     var editGstRate by remember { mutableStateOf("18") }
     var editIsInterstate by remember { mutableStateOf(false) }
     var editNarration by remember { mutableStateOf("") }
+    var editTags by remember { mutableStateOf("") }
+    var editDateMillis by remember { mutableStateOf(0L) }
     var showManualVoucherDialog by remember { mutableStateOf(false) }
     var showQrScannerDialog by remember { mutableStateOf(false) }
     var currentStep by remember { mutableStateOf(1) }
@@ -843,7 +845,7 @@ fun VouchersScreen(
                             viewModel.deleteVoucher(voucher.id) { deleted ->
                                 coroutineScope.launch {
                                     val result = snackbarHostState.showSnackbar(
-                                        message = "Voucher #${deleted.voucherNo} deleted",
+                                        message = "Voucher ${deleted.voucher.voucherNo} deleted",
                                         actionLabel = "UNDO",
                                         duration = SnackbarDuration.Short
                                     )
@@ -881,8 +883,16 @@ fun VouchersScreen(
                                 editingVoucher = voucher
                                 editPartyName = voucher.partyName
                                 editAmountText = voucher.totalAmount.toString()
-                                editGstRate = if (voucher.gstAmount > 0) "18" else "0"
-                                editIsInterstate = false
+                                // Derived from the voucher's own figures and read from the
+                                // voucher itself. Was "18"-or-"0" and a hardcoded false, so
+                                // editing a 5% invoice rewrote it to 18% and any IGST
+                                // voucher silently became CGST+SGST.
+                                editGstRate = GstCalculationService
+                                    .deriveGstRate(voucher.totalAmount, voucher.gstAmount)
+                                    .let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() }
+                                editIsInterstate = voucher.isInterstate
+                                editTags = voucher.tags
+                                editDateMillis = voucher.date
                                 editNarration = voucher.narration
                             },
                             shape = RoundedCornerShape(24.dp),
@@ -1060,7 +1070,7 @@ fun VouchersScreen(
                     onClick = {
                         viewModel.deleteVoucher(targetVoucher.id) { deleted ->
                             coroutineScope.launch {
-                                snackbarHostState.showSnackbar("Voucher #${deleted.voucherNo} deleted")
+                                snackbarHostState.showSnackbar("Voucher ${deleted.voucher.voucherNo} deleted")
                             }
                         }
                         voucherToDeleteConfirm = null
@@ -1239,7 +1249,11 @@ fun VouchersScreen(
                             amountText = editAmountText,
                             gstRateText = editGstRate,
                             isInterstate = editIsInterstate,
-                            narration = editNarration
+                            narration = editNarration,
+                            // Preserved rather than reset: the amendment keeps the
+                            // voucher's own date, and tags used to be wiped on every edit.
+                            dateMillis = editDateMillis,
+                            tags = editTags
                         )
                         editingVoucher = null
                     },

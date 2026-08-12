@@ -142,6 +142,96 @@ interface AccountingDao {
     @Query("DELETE FROM vouchers WHERE id = :id")
     suspend fun deleteVoucherById(id: Long)
 
+    /**
+     * Updates the voucher row in place.
+     *
+     * Deliberately NOT `insertVoucher`, which is `@Insert(onConflict = REPLACE)`: with
+     * foreign keys on, REPLACE deletes the conflicting row first, and journal_entries,
+     * voucher_items and gst_tax_details all declare ON DELETE CASCADE — so using it to
+     * "update" a voucher would silently wipe every posting attached to it.
+     */
+    @Update
+    suspend fun updateVoucherRow(voucher: VoucherEntity)
+
+    @Query("SELECT COUNT(*) FROM vouchers WHERE voucherNo = :voucherNo")
+    suspend fun countVouchersWithNumber(voucherNo: String): Int
+
+    /**
+     * Atomically reads and advances the voucher counter.
+     *
+     * The read and the increment used to be two independent suspending DAO calls with
+     * the coroutine suspended in between, so two concurrent posts could both read 1005
+     * and both write 1006 — issuing the same invoice number twice. That is not
+     * theoretical: the XML import's "Commit Import" fires one independent coroutine per
+     * row, so N rows race on a single `voucher_type_configs` row. Room opens this with
+     * BEGIN IMMEDIATE, which serialises the read-modify-write.
+     */
+    /**
+     * Deletes a voucher and everything attached to it, atomically.
+     *
+     * Was five sequential unguarded writes: a failure part-way left a voucher with some
+     * of its postings gone. [stockReversals] are (itemId, delta) pairs computed by the
+     * caller from the voucher's OWN type, so returns reverse correctly too — the old
+     * code only handled SALES and PURCHASE, so deleting a credit note never gave the
+     * stock back.
+     */
+    @Transaction
+    suspend fun deleteVoucherAtomic(voucherId: Long, stockReversals: List<Pair<Long, Double>>) {
+        stockReversals.forEach { (itemId, delta) -> updateStockQty(itemId, delta) }
+        deleteJournalEntriesForVoucher(voucherId)
+        deleteVoucherItemsForVoucher(voucherId)
+        deleteGstDetailForVoucher(voucherId)
+        deleteVoucherById(voucherId)
+    }
+
+    /** Puts a deleted voucher back with its original id, number and date. */
+    @Transaction
+    suspend fun restoreVoucherAtomic(
+        voucher: VoucherEntity,
+        journalEntries: List<JournalEntryEntity>,
+        items: List<VoucherItemEntity>,
+        gstDetail: GstTaxDetailEntity?,
+        stockDeltas: List<Pair<Long, Double>>
+    ) {
+        insertVoucher(voucher)
+        if (journalEntries.isNotEmpty()) insertJournalEntries(journalEntries)
+        if (items.isNotEmpty()) insertVoucherItems(items)
+        gstDetail?.let { insertGstTaxDetail(it) }
+        stockDeltas.forEach { (itemId, delta) -> updateStockQty(itemId, delta) }
+    }
+
+    /**
+     * Clears a voucher's children and rewrites its header in place, keeping the row.
+     *
+     * The voucher id, number and creation identity survive — an amendment must not burn
+     * a new number, since Rule 46(b) requires a consecutive series and every edit
+     * previously left a permanent gap in it.
+     *
+     * Children are deleted before being re-posted because `insertGstTaxDetail` and
+     * `insertVoucherItems` are REPLACE inserts over autoGenerate primary keys: with
+     * id = 0 they APPEND rather than replace, and the GST summary would double-count.
+     */
+    @Transaction
+    suspend fun clearVoucherChildrenAtomic(
+        voucher: VoucherEntity,
+        stockReversals: List<Pair<Long, Double>>
+    ) {
+        stockReversals.forEach { (itemId, delta) -> updateStockQty(itemId, delta) }
+        deleteJournalEntriesForVoucher(voucher.id)
+        deleteVoucherItemsForVoucher(voucher.id)
+        deleteGstDetailForVoucher(voucher.id)
+        updateVoucherRow(voucher)
+    }
+
+    @Transaction
+    suspend fun reserveNextVoucherNumber(voucherType: String): VoucherTypeConfigEntity? {
+        val config = getVoucherConfigByType(voucherType) ?: return null
+        if (config.autoIncrement) {
+            insertOrUpdateVoucherConfig(config.copy(nextNumber = config.nextNumber + 1))
+        }
+        return config
+    }
+
     // Journal Entry Operations
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertJournalEntries(entries: List<JournalEntryEntity>)
