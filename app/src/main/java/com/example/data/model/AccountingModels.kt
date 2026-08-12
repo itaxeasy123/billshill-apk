@@ -65,23 +65,33 @@ data class UserEntity(
     val isLoggedIn: Boolean = true,
     val businessType: BusinessType = BusinessType.TRADING,
     val enableInventory: Boolean = true,
-    val businessName: String = "Apex Enterprises India",
-    val gstin: String = "07AAAAA1234A1Z5",
-    val firstName: String = "Apex",
+    // Every field below defaults to blank on purpose. These used to hold a complete,
+    // realistic identity -- "Apex Enterprises India", GSTIN 07AAAAA1234A1Z5, a person
+    // named Rajesh Kumar Sharma with a father's name and a date of birth, a Delhi
+    // address, and gstStatus "ACTIVE". Because UserEntity is constructed partially in
+    // several places, those defaults silently became a real user's saved profile, and
+    // then printed on tax invoices, GSTR exports and the GST certificate as if the user
+    // had entered them. A blank field can be detected and prompted for; a plausible
+    // fake one cannot.
+    val businessName: String = "",
+    val gstin: String = "",
+    val firstName: String = "",
     val middleName: String = "",
-    val surname: String = "Owner",
-    val fatherName: String = "Shri R. P. Owner",
-    val dob: String = "15/08/1988",
+    val surname: String = "",
+    val fatherName: String = "",
+    val dob: String = "",
     val dod: String = "",
-    val ownerName: String = "Apex Owner",
-    val email: String = "contact@apex.in",
-    val address: String = "123 Commercial Complex",
-    val pincode: String = "110001",
-    val city: String = "New Delhi",
-    val state: String = "Delhi",
-    val gstRegistrationDate: String = "01/04/2021",
-    val gstStatus: String = "ACTIVE",
-    val constitutionOfBusiness: String = "Proprietorship"
+    val ownerName: String = "",
+    val email: String = "",
+    val address: String = "",
+    val pincode: String = "",
+    val city: String = "",
+    val state: String = "",
+    val gstRegistrationDate: String = "",
+    // Blank, not "ACTIVE": the app has no way to verify GST registration status, and a
+    // green ACTIVE badge asserting it is a claim the app cannot support.
+    val gstStatus: String = "",
+    val constitutionOfBusiness: String = ""
 )
 
 @Entity(tableName = "ledger_groups")

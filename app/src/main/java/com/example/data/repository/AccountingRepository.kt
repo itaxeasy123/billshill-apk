@@ -101,14 +101,23 @@ class AccountingRepository(private val dao: AccountingDao) {
     suspend fun loginWithOtp(phoneNumber: String, otp: String): Boolean {
         // Frictionless OTP verification simulation (accepts any 6 digit OTP e.g. 123456 or auto-verified)
         val token = "jwt_token_user_${System.currentTimeMillis()}"
-        val user = UserEntity(
+
+        // Preserve the existing profile. This used to build a brand-new UserEntity and
+        // save it -- and because the primary key is the constant "primary_user" with
+        // @Insert(onConflict = REPLACE), every login REPLACED the whole row. A business
+        // name, GSTIN and address the user had carefully entered in Settings were wiped
+        // on their next login and overwritten with "Indian Enterprise" and a fabricated
+        // GSTIN. Nothing about verifying an OTP should touch the user's business
+        // details, so it no longer does.
+        val existing = dao.getUserDirect()
+        val user = existing?.copy(
             phoneNumber = phoneNumber,
             token = token,
-            isLoggedIn = true,
-            businessType = BusinessType.TRADING,
-            enableInventory = true,
-            businessName = "Indian Enterprise",
-            gstin = "07AAAAA9999A1Z1"
+            isLoggedIn = true
+        ) ?: UserEntity(
+            phoneNumber = phoneNumber,
+            token = token,
+            isLoggedIn = true
         )
         dao.saveUser(user)
         return true
@@ -164,6 +173,16 @@ class AccountingRepository(private val dao: AccountingDao) {
         val ledger = LedgerEntity(
             name = name,
             groupId = group.id,
+            // These two were omitted, so every manually created ledger fell back to the
+            // entity defaults "General Ledgers" / EXPENSE (H22). Reports read the joined
+            // ledger_groups row and were unaffected, but the Edit dialog pre-fills from
+            // these columns -- so opening any ledger and saving resolved the group name
+            // "General Ledgers", created it if absent, and REASSIGNED groupId. Editing a
+            // customer's opening balance silently moved their receivable out of Assets
+            // and into expenses, and the Balance Sheet still tied because net profit
+            // absorbed it exactly.
+            groupName = group.name,
+            category = group.category,
             openingBalance = openingBalance,
             balanceType = balanceType,
             gstin = gstin,
@@ -194,6 +213,11 @@ class AccountingRepository(private val dao: AccountingDao) {
         val updated = existing.copy(
             name = name,
             groupId = group.id,
+            // Kept in step with groupId. Updating one without the other left the ledger
+            // pointing at a new group while still reporting the old group's name, so the
+            // next edit re-resolved the stale name and moved it again.
+            groupName = group.name,
+            category = group.category,
             openingBalance = openingBalance,
             balanceType = balanceType,
             gstin = gstin,
@@ -802,7 +826,7 @@ class AccountingRepository(private val dao: AccountingDao) {
             val root = JSONObject(jsonStr)
             if (root.has("user")) {
                 val uObj = root.getJSONObject("user")
-                val existing = dao.getUserDirect() ?: UserEntity(phoneNumber = "+919876543210", token = "imported")
+                val existing = dao.getUserDirect() ?: UserEntity(phoneNumber = "", token = "imported")
                 val updated = existing.copy(
                     businessName = uObj.optString("businessName", existing.businessName),
                     gstin = uObj.optString("gstin", existing.gstin),

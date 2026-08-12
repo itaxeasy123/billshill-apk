@@ -56,24 +56,24 @@ object DatabaseSeedEngine {
         )
 
         // 3. Default Chart of Accounts Ledgers
-        dao.insertLedger(LedgerEntity(name = "Cash in Hand", groupId = cashGrp, openingBalance = 50000.0, balanceType = BalanceType.DR))
-        dao.insertLedger(LedgerEntity(name = "HDFC Bank Ltd", groupId = bankGrp, openingBalance = 250000.0, balanceType = BalanceType.DR))
-        dao.insertLedger(LedgerEntity(name = "Sales Account", groupId = salesGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "Purchase Account", groupId = purchaseGrp, openingBalance = 0.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "Cash in Hand", groupId = cashGrp, groupName = "Cash-in-Hand", category = LedgerCategory.ASSET, openingBalance = 50000.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "HDFC Bank Ltd", groupId = bankGrp, groupName = "Bank Accounts", category = LedgerCategory.ASSET, openingBalance = 250000.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "Sales Account", groupId = salesGrp, groupName = "Sales Accounts", category = LedgerCategory.REVENUE, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "Purchase Account", groupId = purchaseGrp, groupName = "Purchase Accounts", category = LedgerCategory.EXPENSE, openingBalance = 0.0, balanceType = BalanceType.DR))
 
         // GST Tax Ledgers
-        dao.insertLedger(LedgerEntity(name = "CGST", groupId = dutiesTaxesGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "SGST", groupId = dutiesTaxesGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "IGST", groupId = dutiesTaxesGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "CESS", groupId = dutiesTaxesGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "CGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "SGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "IGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "CESS", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
 
         // Equity & General Expenses
-        dao.insertLedger(LedgerEntity(name = "Capital Account", groupId = equityGrp, openingBalance = 300000.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "General Expenses", groupId = expenseGrp, openingBalance = 0.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "Capital Account", groupId = equityGrp, groupName = "Equity", category = LedgerCategory.EQUITY, openingBalance = 300000.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "General Expenses", groupId = expenseGrp, groupName = "Expenses", category = LedgerCategory.EXPENSE, openingBalance = 0.0, balanceType = BalanceType.DR))
 
         // Debtors & Creditors
-        dao.insertLedger(LedgerEntity(name = "Apex Traders (Customer)", groupId = debtorsGrp, openingBalance = 0.0, balanceType = BalanceType.DR))
-        dao.insertLedger(LedgerEntity(name = "Royal Suppliers (Vendor)", groupId = creditorsGrp, openingBalance = 0.0, balanceType = BalanceType.CR))
+        dao.insertLedger(LedgerEntity(name = "Apex Traders (Customer)", groupId = debtorsGrp, groupName = "Sundry Debtors", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR))
+        dao.insertLedger(LedgerEntity(name = "Royal Suppliers (Vendor)", groupId = creditorsGrp, groupName = "Sundry Creditors", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
 
         // Inventory Stock Items
         dao.insertInventoryItem(InventoryItemEntity(name = "Wireless Optical Mouse", unit = "Pcs", hsnCode = "8471", gstRate = 18.0, stockQty = 45.0, avgCostPrice = 450.0, sellingPrice = 750.0))

@@ -32,6 +32,35 @@ val MIGRATION_7_8 = object : Migration(7, 8) {
     }
 }
 
+/**
+ * Data-only repair. The schema is byte-identical to v8 — no table, column or index
+ * changes — so the exported 9.json matches 8.json structurally and Room's schema
+ * validation passes unchanged.
+ *
+ * `ledgers.groupName` and `ledgers.category` are denormalised copies of the ledger's
+ * group. Neither the seed nor `createLedger` ever set them, so on every existing device
+ * they hold the entity defaults "General Ledgers" / EXPENSE while `groupId` points at
+ * the correct group. Reports join `ledger_groups` and were unaffected — but the Edit
+ * Ledger dialog pre-fills from these columns, so opening any ledger and saving resolved
+ * the name "General Ledgers", created that group, and reassigned `groupId` to it. One
+ * edit of a customer's opening balance moved their receivable out of Assets and into
+ * expenses, and the Balance Sheet still balanced because net profit absorbed it exactly.
+ *
+ * This realigns the copies with the group each ledger actually belongs to.
+ */
+val MIGRATION_8_9 = object : Migration(8, 9) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            UPDATE ledgers
+               SET groupName = (SELECT lg.name FROM ledger_groups lg WHERE lg.id = ledgers.groupId),
+                   category  = (SELECT lg.category FROM ledger_groups lg WHERE lg.id = ledgers.groupId)
+             WHERE EXISTS (SELECT 1 FROM ledger_groups lg WHERE lg.id = ledgers.groupId)
+            """.trimIndent()
+        )
+    }
+}
+
 class AccountingTypeConverters {
     @TypeConverter
     fun fromBusinessType(value: BusinessType): String = value.name
@@ -80,7 +109,7 @@ class AccountingTypeConverters {
         CrashLog::class,
         MonthlyArchive::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
@@ -101,7 +130,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "indian_mobile_accounting.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     // Deliberately NOT fallbackToDestructiveMigration(): with it enabled, any
                     // schema bump lacking a matching Migration silently drops every table and
                     // recreates it — destroying the user's books with no warning and no backup.
