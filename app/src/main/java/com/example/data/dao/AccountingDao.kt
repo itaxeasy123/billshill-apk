@@ -280,6 +280,33 @@ interface AccountingDao {
     @Query("UPDATE inventory_items SET stockQty = stockQty + :qtyDelta WHERE id = :id")
     suspend fun updateStockQty(id: Long, qtyDelta: Double)
 
+    @Query("UPDATE inventory_items SET avgCostPrice = :newAvgCost WHERE id = :id")
+    suspend fun updateAvgCostPrice(id: Long, newAvgCost: Double)
+
+    /**
+     * Receives stock at a purchase price and rolls the weighted-average cost forward.
+     *
+     * `avgCostPrice` was written once at item creation and never recomputed (H21), so
+     * every closing-stock valuation used the price typed on the day the item was set up,
+     * however long ago and whatever had been paid since. That figure feeds
+     * `SUM(stockQty * avgCostPrice)` into the Balance Sheet and the Trading Account.
+     *
+     * Standard weighted average:
+     *   newAvg = (oldQty x oldAvg + inQty x inRate) / (oldQty + inQty)
+     * Guarded so a nil or negative resulting quantity leaves the cost alone rather than
+     * dividing by zero — stock is allowed to go negative here (C9).
+     */
+    @Transaction
+    suspend fun receiveStockAtCost(itemId: Long, quantity: Double, unitCost: Double) {
+        val item = getInventoryItemById(itemId) ?: return
+        val newQty = item.stockQty + quantity
+        if (quantity > 0.0 && unitCost > 0.0 && newQty > 0.0) {
+            val oldValue = if (item.stockQty > 0.0) item.stockQty * item.avgCostPrice else 0.0
+            updateAvgCostPrice(itemId, (oldValue + quantity * unitCost) / newQty)
+        }
+        updateStockQty(itemId, quantity)
+    }
+
     /**
      * Items carrying a negative quantity (C9).
      *

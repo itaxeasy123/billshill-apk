@@ -424,12 +424,12 @@ class AccountingRepository(
                 )
                 // Credit: GST
                 if (!isInterstate && totalGstAmount > 0) {
-                    val cgst = getLedgerByNameOrCreate("CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
-                    val sgst = getLedgerByNameOrCreate("SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val cgst = getLedgerByNameOrCreate("Output CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val sgst = getLedgerByNameOrCreate("Output SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = cgst.id, debitAmount = 0.0, creditAmount = cgstAmount))
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = sgst.id, debitAmount = 0.0, creditAmount = sgstAmount))
                 } else if (isInterstate && totalGstAmount > 0) {
-                    val igst = getLedgerByNameOrCreate("IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val igst = getLedgerByNameOrCreate("Output IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = igst.id, debitAmount = 0.0, creditAmount = igstAmount))
                 }
 
@@ -461,12 +461,12 @@ class AccountingRepository(
 
                 // Debit: GST
                 if (!isInterstate && totalGstAmount > 0) {
-                    val cgst = getLedgerByNameOrCreate("CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
-                    val sgst = getLedgerByNameOrCreate("SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val cgst = getLedgerByNameOrCreate("Output CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val sgst = getLedgerByNameOrCreate("Output SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = cgst.id, debitAmount = cgstAmount, creditAmount = 0.0))
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = sgst.id, debitAmount = sgstAmount, creditAmount = 0.0))
                 } else if (isInterstate && totalGstAmount > 0) {
-                    val igst = getLedgerByNameOrCreate("IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val igst = getLedgerByNameOrCreate("Output IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = igst.id, debitAmount = igstAmount, creditAmount = 0.0))
                 }
 
@@ -538,12 +538,12 @@ class AccountingRepository(
 
                 // Debit: GST
                 if (!isInterstate && totalGstAmount > 0) {
-                    val cgst = getLedgerByNameOrCreate("CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
-                    val sgst = getLedgerByNameOrCreate("SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val cgst = getLedgerByNameOrCreate("Input CGST", "Duties & Taxes", LedgerCategory.ASSET)
+                    val sgst = getLedgerByNameOrCreate("Input SGST", "Duties & Taxes", LedgerCategory.ASSET)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = cgst.id, debitAmount = cgstAmount, creditAmount = 0.0))
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = sgst.id, debitAmount = sgstAmount, creditAmount = 0.0))
                 } else if (isInterstate && totalGstAmount > 0) {
-                    val igst = getLedgerByNameOrCreate("IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val igst = getLedgerByNameOrCreate("Input IGST", "Duties & Taxes", LedgerCategory.ASSET)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = igst.id, debitAmount = igstAmount, creditAmount = 0.0))
                 }
 
@@ -564,7 +564,15 @@ class AccountingRepository(
                             )
                         )
                     )
-                    dao.updateStockQty(selectedItemId, itemQuantity)
+                    // Receives at the purchase price and rolls the weighted-average cost
+                    // forward. avgCostPrice was set once at item creation and never
+                    // updated, so stock was valued at the price typed on setup day
+                    // regardless of what had been paid since (H21).
+                    dao.receiveStockAtCost(
+                        itemId = selectedItemId,
+                        quantity = itemQuantity,
+                        unitCost = if (itemQuantity > 0) taxableValue / itemQuantity else 0.0
+                    )
                 }
             }
 
@@ -578,12 +586,12 @@ class AccountingRepository(
 
                 // Credit: GST
                 if (!isInterstate && totalGstAmount > 0) {
-                    val cgst = getLedgerByNameOrCreate("CGST", "Duties & Taxes", LedgerCategory.LIABILITY)
-                    val sgst = getLedgerByNameOrCreate("SGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val cgst = getLedgerByNameOrCreate("Input CGST", "Duties & Taxes", LedgerCategory.ASSET)
+                    val sgst = getLedgerByNameOrCreate("Input SGST", "Duties & Taxes", LedgerCategory.ASSET)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = cgst.id, debitAmount = 0.0, creditAmount = cgstAmount))
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = sgst.id, debitAmount = 0.0, creditAmount = sgstAmount))
                 } else if (isInterstate && totalGstAmount > 0) {
-                    val igst = getLedgerByNameOrCreate("IGST", "Duties & Taxes", LedgerCategory.LIABILITY)
+                    val igst = getLedgerByNameOrCreate("Input IGST", "Duties & Taxes", LedgerCategory.ASSET)
                     journalEntries.add(JournalEntryEntity(voucherId = voucherId, ledgerId = igst.id, debitAmount = 0.0, creditAmount = igstAmount))
                 }
 
@@ -1392,6 +1400,14 @@ class AccountingRepository(
      * leaving quantity permanently wrong while the valuation query, which does handle
      * all four types, disagreed with it.
      */
+    // Output tax and input credit are separate ledgers.
+    //
+    // One "CGST" ledger used to carry both, so the tax collected on sales and the credit
+    // paid on purchases netted against each other inside a single balance. The books
+    // could then show a small net figure that concealed a large liability and a large
+    // receivable, and there was no way to read unutilised ITC off the Balance Sheet at
+    // all. Both stay under Tally's "Duties & Taxes" group, as separate accounts.
+
     private fun stockDirection(type: VoucherType): Double = when (type) {
         VoucherType.SALES, VoucherType.PURCHASE_RETURN -> -1.0
         VoucherType.PURCHASE, VoucherType.SALES_RETURN -> 1.0

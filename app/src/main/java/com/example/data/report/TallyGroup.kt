@@ -107,7 +107,20 @@ object TallyGroupMapper {
      * silently accepting a guess.
      */
     fun classify(groupName: String, category: LedgerCategory): Pair<TallyGroup, Boolean> {
-        byName[normalise(groupName)]?.let { return it to true }
+        byName[normalise(groupName)]?.let { matched ->
+            // A group name only wins if it agrees with the ledger's own category.
+            // "Input CGST" is an ASSET — unutilised credit the government owes back —
+            // but it lives in the "Duties & Taxes" group alongside output tax, which
+            // maps to Current Liabilities. Without this check it would be reported on
+            // the wrong face of the Balance Sheet, understating both sides.
+            val agrees = when (category) {
+                LedgerCategory.ASSET -> matched.side == StatementSide.ASSETS
+                LedgerCategory.LIABILITY, LedgerCategory.EQUITY -> matched.side == StatementSide.LIABILITIES
+                LedgerCategory.REVENUE -> matched.side == StatementSide.PNL_CREDIT
+                LedgerCategory.EXPENSE -> matched.side == StatementSide.PNL_DEBIT
+            }
+            if (agrees) return matched to true
+        }
         val fallback = when (category) {
             LedgerCategory.ASSET -> TallyGroup.CURRENT_ASSETS
             LedgerCategory.LIABILITY -> TallyGroup.CURRENT_LIABILITIES

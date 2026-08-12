@@ -298,6 +298,18 @@ class FinancialStatementEngineTest {
     }
 
     @Test
+    fun `input GST is an asset even though it sits in Duties and Taxes`() {
+        // Output and input tax share Tally's "Duties & Taxes" group, which maps to
+        // Current Liabilities. Unutilised input credit is a receivable, and reporting it
+        // on the liabilities face would understate both sides of the sheet.
+        val (outGroup, _) = TallyGroupMapper.classify("Duties & Taxes", LedgerCategory.LIABILITY)
+        assertEquals(StatementSide.LIABILITIES, outGroup.side)
+
+        val (inGroup, _) = TallyGroupMapper.classify("Duties & Taxes", LedgerCategory.ASSET)
+        assertEquals(StatementSide.ASSETS, inGroup.side)
+    }
+
+    @Test
     fun `capital account sits on the liabilities side`() {
         assertEquals(StatementSide.LIABILITIES, TallyGroup.CAPITAL_ACCOUNT.side)
     }

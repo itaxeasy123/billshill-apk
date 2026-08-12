@@ -127,6 +127,74 @@ val MIGRATION_9_10 = object : Migration(9, 10) {
     }
 }
 
+/**
+ * Splits the shared GST ledgers into Output (liability) and Input (credit) — H1.
+ *
+ * One "CGST" ledger carried both the tax collected on sales and the credit paid on
+ * purchases, so the two netted against each other inside a single balance: ₹900 payable
+ * and ₹540 receivable showed as ₹360, concealing both. Unutilised ITC could not be read
+ * off the Balance Sheet at all.
+ *
+ * Data-only — no table, column or index changes — so v11 carries the same identityHash
+ * as v10 and Room's schema validation passes unchanged. Existing postings are re-pointed
+ * by the voucher type that created them, which is the only reliable signal for whether a
+ * given entry was output tax or input credit.
+ */
+val MIGRATION_10_11 = object : Migration(10, 11) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        val heads = "('CGST','SGST','IGST','CESS')"
+
+        db.execSQL(
+            """
+            INSERT INTO ledgers (name, groupId, groupName, category, openingBalance,
+                                 balanceType, currentBalance, pincode, city, state, country, gstin)
+            SELECT 'Output ' || l.name, l.groupId, l.groupName, 'LIABILITY', 0, 'CR', 0, '', '', '', 'India', ''
+              FROM ledgers l
+             WHERE l.name IN $heads
+               AND NOT EXISTS (SELECT 1 FROM ledgers x WHERE x.name = 'Output ' || l.name)
+            """.trimIndent()
+        )
+        db.execSQL(
+            """
+            INSERT INTO ledgers (name, groupId, groupName, category, openingBalance,
+                                 balanceType, currentBalance, pincode, city, state, country, gstin)
+            SELECT 'Input ' || l.name, l.groupId, l.groupName, 'ASSET', 0, 'DR', 0, '', '', '', 'India', ''
+              FROM ledgers l
+             WHERE l.name IN $heads
+               AND NOT EXISTS (SELECT 1 FROM ledgers x WHERE x.name = 'Input ' || l.name)
+            """.trimIndent()
+        )
+
+        listOf(
+            "Output" to "('SALES','SALES_RETURN')",
+            "Input" to "('PURCHASE','PURCHASE_RETURN')"
+        ).forEach { (side, types) ->
+            db.execSQL(
+                """
+                UPDATE journal_entries
+                   SET ledgerId = (SELECT n.id FROM ledgers n
+                                    WHERE n.name = '$side ' || (SELECT o.name FROM ledgers o
+                                                                 WHERE o.id = journal_entries.ledgerId))
+                 WHERE ledgerId IN (SELECT id FROM ledgers WHERE name IN $heads)
+                   AND (SELECT v.voucherType FROM vouchers v WHERE v.id = journal_entries.voucherId) IN $types
+                """.trimIndent()
+            )
+        }
+
+        // Only remove a shared ledger once nothing points at it any more. Anything still
+        // referenced — a JOURNAL or CONTRA posting, whose side cannot be inferred — is
+        // left in place rather than guessed at.
+        db.execSQL(
+            """
+            DELETE FROM ledgers
+             WHERE name IN $heads
+               AND openingBalance = 0
+               AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.ledgerId = ledgers.id)
+            """.trimIndent()
+        )
+    }
+}
+
 class AccountingTypeConverters {
     @TypeConverter
     fun fromBusinessType(value: BusinessType): String = value.name
@@ -175,7 +243,7 @@ class AccountingTypeConverters {
         CrashLog::class,
         MonthlyArchive::class
     ],
-    version = 10,
+    version = 11,
     exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
@@ -196,7 +264,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "indian_mobile_accounting.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     // Deliberately NOT fallbackToDestructiveMigration(): with it enabled, any
                     // schema bump lacking a matching Migration silently drops every table and
                     // recreates it — destroying the user's books with no warning and no backup.

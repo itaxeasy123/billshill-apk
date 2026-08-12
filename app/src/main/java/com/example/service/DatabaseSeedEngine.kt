@@ -73,9 +73,13 @@ object DatabaseSeedEngine {
         dao.insertLedger(LedgerEntity(name = "Purchase Account", groupId = purchaseGrp, groupName = "Purchase Accounts", category = LedgerCategory.EXPENSE, openingBalance = 0.0, balanceType = BalanceType.DR))
 
         // GST Tax Ledgers
-        dao.insertLedger(LedgerEntity(name = "CGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "SGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
-        dao.insertLedger(LedgerEntity(name = "IGST", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
+        // Output tax (collected on sales, a liability) and input credit (paid on
+        // purchases, a receivable) are separate accounts. A single shared ledger per head
+        // let them net against each other invisibly.
+        listOf("CGST", "SGST", "IGST").forEach { head ->
+            dao.insertLedger(LedgerEntity(name = "Output $head", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
+            dao.insertLedger(LedgerEntity(name = "Input $head", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.ASSET, openingBalance = 0.0, balanceType = BalanceType.DR))
+        }
         dao.insertLedger(LedgerEntity(name = "CESS", groupId = dutiesTaxesGrp, groupName = "Duties & Taxes", category = LedgerCategory.LIABILITY, openingBalance = 0.0, balanceType = BalanceType.CR))
 
         // Equity & General Expenses

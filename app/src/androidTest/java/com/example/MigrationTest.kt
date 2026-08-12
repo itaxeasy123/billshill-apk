@@ -6,6 +6,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.example.data.db.AppDatabase
 import com.example.data.db.MIGRATION_8_9
+import com.example.data.db.MIGRATION_10_11
 import com.example.data.db.MIGRATION_9_10
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -174,6 +175,56 @@ class MigrationTest {
         db.query("SELECT COUNT(*) FROM ledgers").use { c ->
             c.moveToFirst()
             assertEquals("the ledger holding 12,000 must survive", 2, c.getInt(0))
+        }
+    }
+
+    /**
+     * 10 → 11 splits the shared GST ledgers so output tax and input credit stop netting
+     * against each other inside one balance.
+     */
+    @Test
+    fun migrate10To11_splitsSharedGstLedgers() {
+        helper.createDatabase(dbName, 10).apply {
+            execSQL("INSERT INTO ledger_groups (id, name, category, parentGroupId) VALUES (5, 'Duties & Taxes', 'LIABILITY', NULL)")
+            execSQL(
+                "INSERT INTO ledgers (id, name, groupId, groupName, category, openingBalance, " +
+                    "balanceType, currentBalance, pincode, city, state, country, gstin, systemCode) VALUES " +
+                    "(20, 'CGST', 5, 'Duties & Taxes', 'LIABILITY', 0.0, 'CR', 0.0, '', '', '', 'India', '', NULL)"
+            )
+            execSQL(
+                "INSERT INTO vouchers (id, voucherNo, voucherType, date, partyName, totalAmount, " +
+                    "gstAmount, isInterstate, narration, isSynced, tags) VALUES " +
+                    "(1, 'INV/1', 'SALES', 100, 'c', 5900.0, 900.0, 0, '', 0, ''), " +
+                    "(2, 'PUR/1', 'PURCHASE', 200, 'v', 3540.0, 540.0, 0, '', 0, '')"
+            )
+            execSQL(
+                "INSERT INTO journal_entries (id, voucherId, ledgerId, debitAmount, creditAmount) VALUES " +
+                    "(1, 1, 20, 0.0, 900.0), (2, 2, 20, 540.0, 0.0)"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 11, true, MIGRATION_10_11)
+
+        // Output tax became a liability of 900...
+        db.query(
+            "SELECT SUM(je.creditAmount) FROM journal_entries je JOIN ledgers l ON je.ledgerId = l.id " +
+                "WHERE l.name = 'Output CGST'"
+        ).use { c -> c.moveToFirst(); assertEquals(900.0, c.getDouble(0), 0.001) }
+
+        // ...and input credit a receivable of 540, where before the two netted to 360.
+        db.query(
+            "SELECT l.category, SUM(je.debitAmount) FROM journal_entries je JOIN ledgers l ON je.ledgerId = l.id " +
+                "WHERE l.name = 'Input CGST'"
+        ).use { c ->
+            c.moveToFirst()
+            assertEquals("ASSET", c.getString(0))
+            assertEquals(540.0, c.getDouble(1), 0.001)
+        }
+
+        // No posting lost.
+        db.query("SELECT COUNT(*) FROM journal_entries").use { c ->
+            c.moveToFirst(); assertEquals(2, c.getInt(0))
         }
     }
 
