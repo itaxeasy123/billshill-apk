@@ -182,11 +182,15 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 }
         }
 
-        // Schedule periodic auto reconciliation background worker
-        com.example.service.LedgerReconciliationWorker.schedulePeriodicReconciliation(getApplication(), true)
-
-        // Trigger initial reconciliation scan on startup
-        triggerAutoReconciliation()
+        // Honour the user's stored choice. This used to pass `true` unconditionally, so
+        // turning reconciliation off in Settings was silently undone on the next launch
+        // and the toggle appeared to have no effect (H19).
+        viewModelScope.launch {
+            val enabled = userSettingsDataStore.autoReconciliationFlow.first()
+            com.example.service.LedgerReconciliationWorker
+                .schedulePeriodicReconciliation(getApplication(), enabled)
+            if (enabled) triggerAutoReconciliation()
+        }
     }
 
     fun setThemeMode(mode: ThemeMode) {

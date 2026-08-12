@@ -336,12 +336,12 @@ interface AccountingDao {
     // GST Statutory Compliance Calculations
     @Query("""
         SELECT 
-            COALESCE(SUM(CASE WHEN v.voucherType = 'SALES' THEN g.cgstAmount ELSE 0 END), 0) as totalOutputCgst,
-            COALESCE(SUM(CASE WHEN v.voucherType = 'SALES' THEN g.sgstAmount ELSE 0 END), 0) as totalOutputSgst,
-            COALESCE(SUM(CASE WHEN v.voucherType = 'SALES' THEN g.igstAmount ELSE 0 END), 0) as totalOutputIgst,
-            COALESCE(SUM(CASE WHEN v.voucherType = 'PURCHASE' THEN g.cgstAmount ELSE 0 END), 0) as totalInputCgst,
-            COALESCE(SUM(CASE WHEN v.voucherType = 'PURCHASE' THEN g.sgstAmount ELSE 0 END), 0) as totalInputSgst,
-            COALESCE(SUM(CASE WHEN v.voucherType = 'PURCHASE' THEN g.igstAmount ELSE 0 END), 0) as totalInputIgst
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.cgstAmount WHEN 'SALES_RETURN' THEN -g.cgstAmount ELSE 0 END), 0) as totalOutputCgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.sgstAmount WHEN 'SALES_RETURN' THEN -g.sgstAmount ELSE 0 END), 0) as totalOutputSgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.igstAmount WHEN 'SALES_RETURN' THEN -g.igstAmount ELSE 0 END), 0) as totalOutputIgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.cgstAmount WHEN 'PURCHASE_RETURN' THEN -g.cgstAmount ELSE 0 END), 0) as totalInputCgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.sgstAmount WHEN 'PURCHASE_RETURN' THEN -g.sgstAmount ELSE 0 END), 0) as totalInputSgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.igstAmount WHEN 'PURCHASE_RETURN' THEN -g.igstAmount ELSE 0 END), 0) as totalInputIgst
         FROM gst_tax_details g
         JOIN vouchers v ON g.voucherId = v.id
     """)

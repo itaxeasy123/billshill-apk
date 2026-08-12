@@ -81,7 +81,7 @@ fun GstItemInputField(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                listOf(0.0, 5.0, 12.0, 18.0, 28.0).forEach { slab ->
+                listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { slab ->
                     FilterChip(
                         selected = Math.abs(gstRate - slab) < 0.1,
                         onClick = { onGstRateChange(slab) },

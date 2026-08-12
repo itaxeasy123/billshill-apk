@@ -85,11 +85,24 @@ object CsvExporter {
         sb.append("3.1 Outward Taxable Supplies (Output Liability),${gstSummary.totalOutputCgst},${gstSummary.totalOutputSgst},${gstSummary.totalOutputIgst},$totalOutput\n")
         val totalInput = gstSummary.totalInputCgst + gstSummary.totalInputSgst + gstSummary.totalInputIgst
         sb.append("4. Eligible Input Tax Credit (Purchases ITC),${gstSummary.totalInputCgst},${gstSummary.totalInputSgst},${gstSummary.totalInputIgst},$totalInput\n")
-        val netCgst = gstSummary.totalOutputCgst - gstSummary.totalInputCgst
-        val netSgst = gstSummary.totalOutputSgst - gstSummary.totalInputSgst
-        val netIgst = gstSummary.totalOutputIgst - gstSummary.totalInputIgst
-        val netTotal = totalOutput - totalInput
-        sb.append("6.1 Net Tax Payable / ITC Balance,${if (netCgst > 0) netCgst else 0.0},${if (netSgst > 0) netSgst else 0.0},${if (netIgst > 0) netIgst else 0.0},${if (netTotal > 0) netTotal else 0.0}\n")
+        // Rule 88A set-off, replacing four independently-netted-and-clamped cells that
+        // could contradict each other by lakhs. `coerceAtLeast(0)` discarded the credit
+        // that Rule 88A requires be pushed from IGST into CGST/SGST, and because max(0,x)
+        // is not invertible nothing downstream could detect the loss.
+        val setOff = com.example.data.gst.Rule88ASetOff.compute(
+            outputIgst = gstSummary.totalOutputIgst,
+            outputCgst = gstSummary.totalOutputCgst,
+            outputSgst = gstSummary.totalOutputSgst,
+            creditIgst = gstSummary.totalInputIgst,
+            creditCgst = gstSummary.totalInputCgst,
+            creditSgst = gstSummary.totalInputSgst
+        )
+        sb.append("6.1 Tax Payable in Cash (s.170 rounded),${setOff.cashCgst},${setOff.cashSgst},${setOff.cashIgst},${setOff.totalCash}\n")
+        sb.append(
+            "ITC Carried Forward,${setOff.cgst.creditCarriedForward}," +
+                "${setOff.sgst.creditCarriedForward},${setOff.igst.creditCarriedForward}," +
+                "${setOff.cgst.creditCarriedForward + setOff.sgst.creditCarriedForward + setOff.igst.creditCarriedForward}\n"
+        )
         return sb.toString()
     }
 

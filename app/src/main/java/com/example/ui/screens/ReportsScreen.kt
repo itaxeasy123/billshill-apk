@@ -712,7 +712,9 @@ fun ReportsScreen(
                                 Button(
                                     onClick = {
                                         val reportText = "GSTR-1 SUMMARY REPORT\nBusiness Name: ${user.businessName}\nGSTIN: ${user.gstin}\nTotal Outbound Sales Invoices: ${outboundSales.size}\nTotal Sales Amount: ₹${totalOutboundVal}\nTotal GST Liability: ₹${totalOutboundTax}\n\n1. B2B Invoices: ${b2bSales.size} Invoices (₹${b2bSales.sumOf { it.totalAmount }})\n2. B2C Large: ${b2cLarge.size} Invoices (₹${b2cLarge.sumOf { it.totalAmount }})\n3. B2C Small: ${b2cSmall.size} Invoices (₹${b2cSmall.sumOf { it.totalAmount }})"
-                                        CsvExporter.shareTextOrPdfReport(context, "GSTR1_Summary_${System.currentTimeMillis()}.pdf", reportText)
+                                        // .txt, not .pdf: this writes plain text and shares it as text/plain. The
+                                        // .pdf name meant no PDF viewer could open the file it produced.
+                                        CsvExporter.shareTextOrPdfReport(context, "GSTR1_Summary_${System.currentTimeMillis()}.txt", reportText)
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepPurpleSecondary),
                                     shape = RoundedCornerShape(10.dp),
@@ -720,7 +722,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export PDF / Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export Text Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 
@@ -1032,7 +1034,7 @@ fun ReportsScreen(
                                 Button(
                                     onClick = {
                                         val reportText = "GSTR-3B SUMMARY REPORT\nBusiness Name: ${user.businessName}\nGSTIN: ${user.gstin}\n\n3.1 Outward Taxable Supplies Output: ₹${totalOutputGst}\n4. Eligible Input Tax Credit: ₹${totalInputGst}\nNet GST Balance: ₹${totalInputGst - totalOutputGst}"
-                                        CsvExporter.shareTextOrPdfReport(context, "GSTR3B_Summary_${System.currentTimeMillis()}.pdf", reportText)
+                                        CsvExporter.shareTextOrPdfReport(context, "GSTR3B_Summary_${System.currentTimeMillis()}.txt", reportText)
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepPurpleSecondary),
                                     shape = RoundedCornerShape(10.dp),
@@ -1040,7 +1042,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export PDF / Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export Text Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                                 }
                             }
 

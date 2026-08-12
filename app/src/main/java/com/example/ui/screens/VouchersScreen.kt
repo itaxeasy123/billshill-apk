@@ -557,7 +557,7 @@ fun VouchersScreen(
                                         .horizontalScroll(rememberScrollState()),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    listOf("0", "5", "12", "18", "28").forEach { rate ->
+                                    listOf("0", "0.25", "3", "5", "12", "18", "28", "40").forEach { rate ->
                                         FilterChip(
                                             selected = selectedGstRate == rate,
                                             onClick = { selectedGstRate = rate },
@@ -1465,7 +1465,7 @@ fun GstCalculatorModal(
                     modifier = Modifier.horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    listOf("0", "5", "12", "18", "28").forEach { r ->
+                    listOf("0", "0.25", "3", "5", "12", "18", "28", "40").forEach { r ->
                         FilterChip(
                             selected = calcGstRate == r,
                             onClick = { calcGstRate = r },

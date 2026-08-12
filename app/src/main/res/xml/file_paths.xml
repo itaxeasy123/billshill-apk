@@ -3,4 +3,8 @@
     <cache-path name="cache" path="." />
     <external-cache-path name="external_cache" path="." />
     <files-path name="files" path="." />
+    <!-- GST auto-export writes to getExternalFilesDir(DIRECTORY_DOCUMENTS). Without this
+         root, FileProvider.getUriForFile throws "Failed to find configured root" and the
+         file the app reported as exported was unreachable from inside the app. -->
+    <external-files-path name="external_documents" path="." />
 </paths>
