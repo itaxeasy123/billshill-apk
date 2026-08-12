@@ -1693,8 +1693,15 @@ fun ReportsScreen(
                                 type = imported.voucherType,
                                 partyName = imported.partyName,
                                 amountText = imported.amount.toString(),
-                                gstRateText = if (imported.gstAmount > 0) "18" else "0",
-                                isInterstate = false,
+                                // Derived from the imported figures and read from the
+                                // import itself. The "18"-or-"0" literal and a hardcoded
+                                // false are the same guess that was removed from the edit
+                                // dialogs — it silently rewrote every non-18% voucher and
+                                // converted IGST imports to CGST+SGST.
+                                gstRateText = GstCalculationService
+                                    .deriveGstRate(imported.amount, imported.gstAmount)
+                                    .let { if (it % 1.0 == 0.0) it.toInt().toString() else it.toString() },
+                                isInterstate = imported.isInterstate,
                                 narration = "${imported.narration} [Source: ${imported.source}]"
                             )
                         }

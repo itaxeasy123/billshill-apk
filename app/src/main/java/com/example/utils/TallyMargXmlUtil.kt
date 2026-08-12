@@ -15,6 +15,7 @@ data class TallyMargParsedVoucher(
     val amount: Double,
     val gstAmount: Double,
     val narration: String,
+    val isInterstate: Boolean,
     val source: String // "TALLY_XML" or "MARG_XML"
 )
 
@@ -32,6 +33,18 @@ data class ImportConflictItem(
 
 object TallyMargXmlUtil {
 
+    /**
+     * Full XML escaping. Only `&` was escaped, so a party called "A & B < C Traders"
+     * produced a document no parser would accept.
+     */
+    private fun xmlEscape(value: String): String = value
+        .replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\"", "&quot;")
+        .replace("'", "&apos;")
+
+
     private val tallyDateFormat = SimpleDateFormat("yyyyMMdd", Locale.ENGLISH)
     private val standardDateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.ENGLISH)
 
@@ -41,7 +54,7 @@ object TallyMargXmlUtil {
         sb.append("<ENVELOPE>\n")
         sb.append("  <HEADER>\n")
         sb.append("    <TALLYREQUEST>Import Data</TALLYREQUEST>\n")
-        sb.append("    <COMPANY>${user.businessName.replace("&", "&amp;")}</COMPANY>\n")
+        sb.append("    <COMPANY>${user.businessName.let { xmlEscape(it) }}</COMPANY>\n")
         sb.append("    <GSTIN>${user.gstin}</GSTIN>\n")
         sb.append("  </HEADER>\n")
         sb.append("  <BODY>\n")
@@ -58,8 +71,8 @@ object TallyMargXmlUtil {
             sb.append("            <DATE>$dateStr</DATE>\n")
             sb.append("            <VOUCHERTYPENAME>${v.voucherType.name}</VOUCHERTYPENAME>\n")
             sb.append("            <VOUCHERNUMBER>${v.voucherNo}</VOUCHERNUMBER>\n")
-            sb.append("            <PARTYLEDGERNAME>${v.partyName.replace("&", "&amp;")}</PARTYLEDGERNAME>\n")
-            sb.append("            <NARRATION>${v.narration.replace("&", "&amp;")}</NARRATION>\n")
+            sb.append("            <PARTYLEDGERNAME>${v.partyName.let { xmlEscape(it) }}</PARTYLEDGERNAME>\n")
+            sb.append("            <NARRATION>${v.narration.let { xmlEscape(it) }}</NARRATION>\n")
             sb.append("            <AMOUNT>${v.totalAmount}</AMOUNT>\n")
             sb.append("            <GSTAMOUNT>${v.gstAmount}</GSTAMOUNT>\n")
             sb.append("            <ISINTERSTATE>${if (v.isInterstate) "YES" else "NO"}</ISINTERSTATE>\n")
@@ -79,7 +92,7 @@ object TallyMargXmlUtil {
         sb.append("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n")
         sb.append("<MARG_DATA_EXPORT>\n")
         sb.append("  <COMPANY_INFO>\n")
-        sb.append("    <COMPANY_NAME>${user.businessName.replace("&", "&amp;")}</COMPANY_NAME>\n")
+        sb.append("    <COMPANY_NAME>${user.businessName.let { xmlEscape(it) }}</COMPANY_NAME>\n")
         sb.append("    <GSTIN>${user.gstin}</GSTIN>\n")
         sb.append("  </COMPANY_INFO>\n")
         sb.append("  <TRANSACTIONS>\n")
@@ -90,10 +103,10 @@ object TallyMargXmlUtil {
             sb.append("      <VOUCHER_NO>${v.voucherNo}</VOUCHER_NO>\n")
             sb.append("      <TYPE>${v.voucherType.name}</TYPE>\n")
             sb.append("      <DATE>$dateStr</DATE>\n")
-            sb.append("      <PARTY_NAME>${v.partyName.replace("&", "&amp;")}</PARTY_NAME>\n")
+            sb.append("      <PARTY_NAME>${v.partyName.let { xmlEscape(it) }}</PARTY_NAME>\n")
             sb.append("      <NET_AMOUNT>${v.totalAmount}</NET_AMOUNT>\n")
             sb.append("      <TAX_AMOUNT>${v.gstAmount}</TAX_AMOUNT>\n")
-            sb.append("      <REMARKS>${v.narration.replace("&", "&amp;")}</REMARKS>\n")
+            sb.append("      <REMARKS>${v.narration.let { xmlEscape(it) }}</REMARKS>\n")
             sb.append("    </ENTRY>\n")
         }
 
@@ -127,9 +140,20 @@ object TallyMargXmlUtil {
 
             val amount = amountStr.toDoubleOrNull() ?: 0.0
             val gstAmount = gstAmountStr.toDoubleOrNull() ?: 0.0
+            // The exporter writes ISINTERSTATE; the parser never read it back, so a
+            // round trip silently converted every IGST voucher to CGST+SGST.
+            val isInterstate = extractXmlTag(block, "ISINTERSTATE")
+                .trim().equals("YES", ignoreCase = true)
 
             if (partyName.isNotBlank() && amount > 0.0) {
                 val vType = when {
+                    // RETURN is tested FIRST. "SALES_RETURN".contains("SALE") is true, so
+                    // testing SALE first imported every credit note as a sale and every
+                    // debit note as a purchase — reversing the entry (H23).
+                    vTypeStr.contains("SALES_RETURN", true) || vTypeStr.contains("CREDIT NOTE", true) ||
+                        (vTypeStr.contains("SALE", true) && vTypeStr.contains("RETURN", true)) -> VoucherType.SALES_RETURN
+                    vTypeStr.contains("PURCHASE_RETURN", true) || vTypeStr.contains("DEBIT NOTE", true) ||
+                        (vTypeStr.contains("PURCHASE", true) && vTypeStr.contains("RETURN", true)) -> VoucherType.PURCHASE_RETURN
                     vTypeStr.contains("SALE", ignoreCase = true) -> VoucherType.SALES
                     vTypeStr.contains("PURCHASE", ignoreCase = true) -> VoucherType.PURCHASE
                     vTypeStr.contains("PAYMENT", ignoreCase = true) -> VoucherType.PAYMENT
@@ -148,6 +172,7 @@ object TallyMargXmlUtil {
                         amount = amount,
                         gstAmount = gstAmount,
                         narration = narration.replace("&amp;", "&"),
+                        isInterstate = isInterstate,
                         source = sourceTag
                     )
                 )

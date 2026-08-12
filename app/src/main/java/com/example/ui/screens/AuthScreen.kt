@@ -25,9 +25,9 @@ import com.example.ui.theme.*
 
 @Composable
 fun AuthScreen(viewModel: AccountingViewModel) {
-    var phoneNumber by remember { mutableStateOf("9876543210") }
-    var otpCode by remember { mutableStateOf("123456") }
-    var isOtpSent by remember { mutableStateOf(false) }
+    // Was prefilled with a working-looking number and OTP, so the app was one tap from
+    // "logged in" with fabricated identity.
+    var phoneNumber by remember { mutableStateOf("") }
 
     Box(
         modifier = Modifier
@@ -61,7 +61,7 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
                             imageVector = Icons.Default.VerifiedUser,
-                            contentDescription = "OTP Auth",
+                            contentDescription = "Set up your books",
                             tint = RoyalPurplePrimary,
                             modifier = Modifier.size(36.dp)
                         )
@@ -100,32 +100,25 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                         .testTag("phone_number_input")
                 )
 
-                if (isOtpSent) {
-                    Spacer(modifier = Modifier.height(16.dp))
-                    OutlinedTextField(
-                        value = otpCode,
-                        onValueChange = { otpCode = it },
-                        label = { Text("6-Digit OTP") },
-                        leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-                        singleLine = true,
-                        shape = RoundedCornerShape(16.dp),
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("otp_code_input")
-                    )
-                }
+                Spacer(modifier = Modifier.height(10.dp))
+                Text(
+                    text = "Your books are stored on this device. This number identifies " +
+                        "them and appears on your invoices — it is not verified.",
+                    fontSize = 11.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Spacer(modifier = Modifier.height(24.dp))
 
                 Button(
-                    onClick = {
-                        if (!isOtpSent) {
-                            isOtpSent = true
-                        } else {
-                            viewModel.login(phoneNumber, otpCode)
-                        }
-                    },
+                    // The OTP step was removed rather than kept as decoration. No OTP was
+                    // ever sent — there is no backend and Firebase Auth is not wired — and
+                    // loginWithOtp returned true for any input, so a prefilled "123456"
+                    // sat next to a "Verify" button that verified nothing. An app that
+                    // stores its books locally does not need a login; pretending to
+                    // authenticate is worse than not claiming to.
+                    onClick = { viewModel.login(phoneNumber, "") },
+                    enabled = phoneNumber.trim().length >= 10,
                     shape = RoundedCornerShape(16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                     modifier = Modifier
@@ -134,7 +127,7 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                         .testTag("login_action_button")
                 ) {
                     Text(
-                        text = if (!isOtpSent) "Send OTP" else "Verify & Get Started",
+                        text = "Get Started",
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
