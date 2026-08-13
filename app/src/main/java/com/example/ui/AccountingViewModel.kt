@@ -309,6 +309,79 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
      * `isLoggedIn = false` and MainActivity shows AuthScreen while it is false, a fresh
      * install could not get past the first screen at all.
      */
+    private val _otpSent = MutableStateFlow(false)
+    val otpSentState: StateFlow<Boolean> = _otpSent.asStateFlow()
+
+    private val _otpBusy = MutableStateFlow(false)
+    val otpBusyState: StateFlow<Boolean> = _otpBusy.asStateFlow()
+
+    /**
+     * Asks the backend to send a real OTP.
+     *
+     * The step that used to sit here sent nothing and accepted anything. This one can
+     * fail, and says so.
+     */
+    fun sendOtp(phoneNumber: String) {
+        viewModelScope.launch {
+            if (phoneNumber.filter { it.isDigit() }.length < 10) {
+                _messageEvent.emit("Please enter a valid 10-digit mobile number")
+                return@launch
+            }
+            _otpBusy.value = true
+            when (val result = com.example.data.auth.OtpAuthClient.sendOtp(phoneNumber)) {
+                is com.example.data.auth.OtpResult.Sent -> {
+                    _otpSent.value = true
+                    _messageEvent.emit("OTP sent to ${com.example.data.auth.OtpAuthClient.normalisePhone(phoneNumber)}")
+                }
+                is com.example.data.auth.OtpResult.Failed -> _messageEvent.emit(result.message)
+                else -> Unit
+            }
+            _otpBusy.value = false
+        }
+    }
+
+    fun resendOtp(phoneNumber: String) {
+        viewModelScope.launch {
+            _otpBusy.value = true
+            when (val result = com.example.data.auth.OtpAuthClient.resendOtp(phoneNumber)) {
+                is com.example.data.auth.OtpResult.Sent -> _messageEvent.emit("OTP sent again")
+                is com.example.data.auth.OtpResult.Failed -> _messageEvent.emit(result.message)
+                else -> Unit
+            }
+            _otpBusy.value = false
+        }
+    }
+
+    /**
+     * Verifies the code with the backend, and only then opens the books.
+     *
+     * On success nothing is copied out of the response — the backend belongs to a
+     * different product, and this app's profile and books are its own. All that is
+     * recorded locally is the phone number the user proved they own.
+     */
+    fun verifyOtpAndLogin(phoneNumber: String, otp: String) {
+        viewModelScope.launch {
+            if (otp.filter { it.isDigit() }.length < 4) {
+                _messageEvent.emit("Enter the code from the SMS")
+                return@launch
+            }
+            _otpBusy.value = true
+            when (val result = com.example.data.auth.OtpAuthClient.verifyOtp(phoneNumber, otp)) {
+                is com.example.data.auth.OtpResult.Verified -> {
+                    login(com.example.data.auth.OtpAuthClient.normalisePhone(phoneNumber))
+                    _otpSent.value = false
+                }
+                is com.example.data.auth.OtpResult.Failed -> _messageEvent.emit(result.message)
+                else -> Unit
+            }
+            _otpBusy.value = false
+        }
+    }
+
+    fun resetOtpFlow() {
+        _otpSent.value = false
+    }
+
     fun login(phoneNumber: String) {
         viewModelScope.launch {
             if (phoneNumber.trim().length < 10) {

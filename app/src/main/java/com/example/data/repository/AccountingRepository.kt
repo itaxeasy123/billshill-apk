@@ -214,7 +214,12 @@ class AccountingRepository(
 
     suspend fun loginWithOtp(phoneNumber: String, otp: String): Boolean {
         // Frictionless OTP verification simulation (accepts any 6 digit OTP e.g. 123456 or auto-verified)
-        val token = "jwt_token_user_${System.currentTimeMillis()}"
+        // No fake credential. This used to store "jwt_token_user_<millis>" — a string
+        // shaped like a JWT that was never a JWT and that nothing ever read. The real
+        // access token from the OTP backend is deliberately not kept either: that backend
+        // belongs to another product and this app calls no authenticated endpoint, so
+        // holding a credential would be storing a secret for no purpose.
+        val token = ""
 
         // Preserve the existing profile. This used to build a brand-new UserEntity and
         // save it -- and because the primary key is the constant "primary_user" with
