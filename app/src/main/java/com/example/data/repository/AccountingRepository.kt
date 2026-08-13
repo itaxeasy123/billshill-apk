@@ -792,10 +792,16 @@ class AccountingRepository(
         //    STOCK_OPENING has no counterparty — it posts to Stock-in-Hand and Suspense
         //    directly — and creating one left a junk zero-balance ledger named "Opening
         //    Stock" in the Chart of Accounts and the party autocomplete.
-        var partyLedger = if (voucherType == VoucherType.STOCK_OPENING) {
-            getOrCreateSystemLedger(SYSTEM_LEDGER_STOCK, "Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET)
-        } else {
-            getOrCreatePartyLedger(partyName, voucherType)
+        //    Neither STOCK_OPENING nor CONTRA has a counterparty: opening stock posts to
+        //    Stock-in-Hand and Suspense, and a Contra moves money between two accounts the
+        //    business already owns. Creating one left a junk zero-balance ledger named
+        //    after the narration ("Cash Deposit to Bank", "Opening Stock") in the Chart of
+        //    Accounts and the party autocomplete — and the branches never post to it.
+        var partyLedger = when (voucherType) {
+            VoucherType.STOCK_OPENING ->
+                getOrCreateSystemLedger(SYSTEM_LEDGER_STOCK, "Stock-in-Hand", "Stock-in-Hand", LedgerCategory.ASSET)
+            VoucherType.CONTRA -> cashLedger()
+            else -> getOrCreatePartyLedger(partyName, voucherType)
         }
         val cleanedGstin = partyGstin.trim()
         if (cleanedGstin.isNotBlank() && partyLedger.gstin != cleanedGstin) {
