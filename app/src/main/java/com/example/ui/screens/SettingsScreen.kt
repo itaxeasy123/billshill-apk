@@ -278,7 +278,15 @@ fun SettingsScreen(
                                 val newType = if (isEnabled) BusinessType.TRADING else BusinessType.SERVICE
                                 viewModel.updateBusinessSettings(newType, isEnabled)
                             },
-                            colors = SwitchDefaults.colors(checkedThumbColor = RoyalPurplePrimary)
+                            colors = SwitchDefaults.colors(
+                            // The thumb is white ON the purple track. Setting the
+                            // thumb to RoyalPurplePrimary made it the same colour as
+                            // the track M3 already derives from colorScheme.primary,
+                            // so the thumb vanished and the switch rendered as a
+                            // solid purple box with no visible on/off position.
+                            checkedThumbColor = OnAccent,
+                            checkedTrackColor = RoyalPurplePrimary
+                        )
                         )
                     }
 
@@ -386,7 +394,15 @@ fun SettingsScreen(
                         Switch(
                             checked = dynamicColor,
                             onCheckedChange = { viewModel.setDynamicColor(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = RoyalPurplePrimary),
+                            colors = SwitchDefaults.colors(
+                            // The thumb is white ON the purple track. Setting the
+                            // thumb to RoyalPurplePrimary made it the same colour as
+                            // the track M3 already derives from colorScheme.primary,
+                            // so the thumb vanished and the switch rendered as a
+                            // solid purple box with no visible on/off position.
+                            checkedThumbColor = OnAccent,
+                            checkedTrackColor = RoyalPurplePrimary
+                        ),
                             modifier = Modifier.testTag("dynamic_color_switch")
                         )
                     }
@@ -891,7 +907,15 @@ fun SettingsScreen(
                         Switch(
                             checked = autoReconciliationEnabled,
                             onCheckedChange = { viewModel.toggleAutoReconciliation(it) },
-                            colors = SwitchDefaults.colors(checkedThumbColor = RoyalPurplePrimary)
+                            colors = SwitchDefaults.colors(
+                            // The thumb is white ON the purple track. Setting the
+                            // thumb to RoyalPurplePrimary made it the same colour as
+                            // the track M3 already derives from colorScheme.primary,
+                            // so the thumb vanished and the switch rendered as a
+                            // solid purple box with no visible on/off position.
+                            checkedThumbColor = OnAccent,
+                            checkedTrackColor = RoyalPurplePrimary
+                        )
                         )
                     }
 

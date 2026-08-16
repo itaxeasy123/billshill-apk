@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.InventoryItemEntity
@@ -223,36 +224,42 @@ fun VouchersScreen(
             contentPadding = PaddingValues(top = 16.dp, bottom = 80.dp)
         ) {
         item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Create Voucher",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Auto-calculates statutory ledgers & balanced postings",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-                Spacer(modifier = Modifier.width(8.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            // Title above, actions below.
+            //
+            // "Quick Entry" and "Manual" need about 200dp of a 320dp row, so no subtitle
+            // could fit beside them at any weight -- it wrapped to three lines and pushed
+            // the whole header down. Stacking gives the subtitle the full width and the
+            // buttons an equal half each, which fits at 360dp with room to spare.
+            Column(modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    text = "Create Voucher",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                Text(
+                    text = "Auto-calculates statutory ledgers & balanced postings",
+                    fontSize = 11.sp,
+                    lineHeight = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     Button(
                         onClick = { showQrScannerDialog = true },
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = AccountingGreen),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(36.dp).testTag("open_qr_scanner_btn")
+                        modifier = Modifier.weight(1f).height(38.dp).testTag("open_qr_scanner_btn")
                     ) {
                         Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Quick Entry", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text("Quick Entry", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
 
                     FilledTonalButton(
@@ -260,11 +267,11 @@ fun VouchersScreen(
                         shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.filledTonalButtonColors(containerColor = LavenderContainer),
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(36.dp).testTag("open_manual_voucher_dialog_btn")
+                        modifier = Modifier.weight(1f).height(38.dp).testTag("open_manual_voucher_dialog_btn")
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Manual", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text("Manual", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -335,23 +342,18 @@ fun VouchersScreen(
                                 letterSpacing = 0.5.sp
                             )
                             Spacer(modifier = Modifier.height(6.dp))
-                            ScrollableTabRow(
-                                selectedTabIndex = visibleVoucherTypes.indexOf(selectedVoucherType).coerceAtLeast(0),
-                                edgePadding = 0.dp,
-                                containerColor = Color.Transparent,
-                                divider = {}
-                            ) {
+                            // Wrapping, not a ScrollableTabRow. Chips inside a scrollable
+                            // tab strip were sliced through mid-shape at both edges --
+                            // half a rounded outline hanging off each side reads as a
+                            // rendering fault, and the types past the edge were invisible.
+                            // The full set now fits on two lines.
+                            ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp, verticalSpacing = 6.dp) {
                                 visibleVoucherTypes.forEach { type ->
-                                    val isSelected = selectedVoucherType == type
-                                    FilterChip(
-                                        selected = isSelected,
+                                    ChoiceChip(
+                                        label = type.displayName,
+                                        selected = selectedVoucherType == type,
                                         onClick = { selectedVoucherType = type },
-                                        label = { Text(type.displayName, fontSize = 11.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = RoyalPurplePrimary,
-                                            selectedLabelColor = OnAccent
-                                        ),
-                                        modifier = Modifier.padding(end = 6.dp)
+                                        fontSize = 11.sp
                                     )
                                 }
                             }
@@ -650,7 +652,15 @@ fun VouchersScreen(
                                     Switch(
                                         checked = isInterstate,
                                         onCheckedChange = { isInterstate = it },
-                                        colors = SwitchDefaults.colors(checkedThumbColor = RoyalPurplePrimary)
+                                        colors = SwitchDefaults.colors(
+                            // The thumb is white ON the purple track. Setting the
+                            // thumb to RoyalPurplePrimary made it the same colour as
+                            // the track M3 already derives from colorScheme.primary,
+                            // so the thumb vanished and the switch rendered as a
+                            // solid purple box with no visible on/off position.
+                            checkedThumbColor = OnAccent,
+                            checkedTrackColor = RoyalPurplePrimary
+                        )
                                     )
                                 }
                             }
@@ -861,13 +871,13 @@ fun VouchersScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Daybook Voucher Audit Log",
+                        text = "Daybook",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                        text = "${filteredVouchers.size} / ${vouchers.size} Entries • Swipe item to delete",
+                        text = "${filteredVouchers.size} of ${vouchers.size} • swipe to delete",
                         fontSize = 11.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -894,7 +904,15 @@ fun VouchersScreen(
             OutlinedTextField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = { Text("Search party, voucher #, narration, or amount...") },
+                // Capped at one line: the full sentence wrapped to two lines inside the
+                // field and doubled its height before anything was typed.
+                placeholder = {
+                    Text(
+                        "Search vouchers",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 singleLine = true,
                 shape = RoundedCornerShape(16.dp),

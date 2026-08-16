@@ -306,7 +306,15 @@ fun GstCalculatorModal(
                         Switch(
                             checked = isInterstate,
                             onCheckedChange = { isInterstate = it },
-                            colors = SwitchDefaults.colors(checkedThumbColor = RoyalPurplePrimary)
+                            colors = SwitchDefaults.colors(
+                            // The thumb is white ON the purple track. Setting the
+                            // thumb to RoyalPurplePrimary made it the same colour as
+                            // the track M3 already derives from colorScheme.primary,
+                            // so the thumb vanished and the switch rendered as a
+                            // solid purple box with no visible on/off position.
+                            checkedThumbColor = OnAccent,
+                            checkedTrackColor = RoyalPurplePrimary
+                        )
                         )
                     }
 
