@@ -302,11 +302,11 @@ fun ManualVoucherDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                 modifier = Modifier.testTag("submit_manual_voucher_btn")
             ) {
-                Text("Post Balanced Voucher")
+                Text("Post Voucher", maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text("Cancel", maxLines = 1, softWrap = false) }
         }
     )
 }

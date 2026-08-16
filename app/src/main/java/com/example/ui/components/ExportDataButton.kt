@@ -21,7 +21,10 @@ import com.example.utils.CsvExporter
 @Composable
 fun ExportDataButton(
     viewModel: AccountingViewModel,
-    label: String = "Export Data",
+    // Just "Export". The button opens a menu of export formats, so the long
+    // per-tab names ("Export B/S Data") said nothing the surrounding heading
+    // did not already say -- and they wrapped to two lines inside the button.
+    label: String = "Export",
     modifier: Modifier = Modifier,
     isOutlined: Boolean = false
 ) {
@@ -40,7 +43,7 @@ fun ExportDataButton(
             ) {
                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
             }
         } else {
             Button(
@@ -51,7 +54,7 @@ fun ExportDataButton(
             ) {
                 Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                Text(label, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
             }
         }
 

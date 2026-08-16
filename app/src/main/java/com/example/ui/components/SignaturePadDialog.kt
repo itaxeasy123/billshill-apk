@@ -168,7 +168,7 @@ fun SignaturePadDialog(
                     ) {
                         Icon(imageVector = Icons.Default.Refresh, contentDescription = "Clear", modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Clear", fontSize = 12.sp)
+                        Text("Clear", fontSize = 12.sp, maxLines = 1, softWrap = false)
                     }
 
                     Text(
@@ -217,12 +217,12 @@ fun SignaturePadDialog(
             ) {
                 Icon(imageVector = Icons.Default.Check, contentDescription = "Save", modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text("Save Signature", fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                Text("Save Signature", fontWeight = FontWeight.Bold, fontSize = 13.sp, maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismissRequest) {
-                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("Cancel", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
             }
         }
     )

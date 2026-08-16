@@ -185,7 +185,7 @@ fun VoucherTypeManagementModal(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Done")
+                    Text("Done", maxLines = 1, softWrap = false)
                 }
             }
         }

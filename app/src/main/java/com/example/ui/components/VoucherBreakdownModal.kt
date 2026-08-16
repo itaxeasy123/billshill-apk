@@ -95,12 +95,12 @@ fun VoucherBreakdownModal(
                     colors = ButtonDefaults.buttonColors(containerColor = AccountingRed),
                     shape = RoundedCornerShape(10.dp)
                 ) {
-                    Text("Delete Voucher")
+                    Text("Delete Voucher", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { voucherToDelete = null }) {
-                    Text("Cancel")
+                    Text("Cancel", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -305,7 +305,7 @@ fun VoucherBreakdownModal(
                                                     modifier = Modifier.size(14.dp)
                                                 )
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Delete Voucher", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                                Text("Delete Voucher", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                             }
                                         }
                                     }
@@ -325,7 +325,7 @@ fun VoucherBreakdownModal(
                         colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Close Breakdown", fontWeight = FontWeight.Bold)
+                        Text("Close Breakdown", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             }

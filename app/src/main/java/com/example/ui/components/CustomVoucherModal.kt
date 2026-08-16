@@ -244,7 +244,7 @@ fun CustomVoucherModal(
                 ) {
                     Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
-                    Text("Save voucher", fontSize = 15.sp, fontWeight = FontWeight.Bold)
+                    Text("Save voucher", fontSize = 15.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
             }
         }

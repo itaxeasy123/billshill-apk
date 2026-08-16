@@ -557,7 +557,7 @@ fun LedgerManagementModal(
             },
             dismissButton = {
                 TextButton(onClick = { showCreateEditDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -629,7 +629,7 @@ fun LedgerManagementModal(
                         colors = ButtonDefaults.buttonColors(containerColor = AccountingRed),
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Delete", fontWeight = FontWeight.Bold)
+                        Text("Delete", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             },

@@ -531,7 +531,7 @@ fun GstCalculatorModal(
                         ) {
                             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Copy Summary", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Copy Summary", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         if (onApplyToVoucher != null) {
@@ -551,7 +551,7 @@ fun GstCalculatorModal(
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Use in Voucher", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Use in Voucher", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -560,7 +560,7 @@ fun GstCalculatorModal(
                         onClick = onDismiss,
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        Text("Close Calculator", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Close", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, softWrap = false)
                     }
                 }
             }

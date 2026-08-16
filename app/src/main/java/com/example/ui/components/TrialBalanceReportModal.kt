@@ -157,7 +157,7 @@ fun TrialBalanceReportModal(
                                         appendLine("==========================================")
                                     }
                                     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = ClipData.newPlainText("Trial Balance Report", summaryText)
+                                    val clip = ClipData.newPlainText("Full Report", summaryText)
                                     clipboard.setPrimaryClip(clip)
                                     Toast.makeText(context, "Trial Balance statement copied to clipboard!", Toast.LENGTH_SHORT).show()
                                 },
@@ -166,7 +166,7 @@ fun TrialBalanceReportModal(
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy Summary", fontSize = 12.sp)
+                                Text("Copy Summary", fontSize = 12.sp, maxLines = 1, softWrap = false)
                             }
 
                             Button(
@@ -180,7 +180,7 @@ fun TrialBalanceReportModal(
                             ) {
                                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
                     }

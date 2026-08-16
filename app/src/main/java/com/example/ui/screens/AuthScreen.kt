@@ -117,10 +117,10 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                     )
                     Row {
                         TextButton(onClick = { viewModel.resendOtp(phoneNumber) }, enabled = !otpBusy) {
-                            Text("Resend code", fontSize = 12.sp)
+                            Text("Resend code", fontSize = 12.sp, maxLines = 1, softWrap = false)
                         }
                         TextButton(onClick = { viewModel.resetOtpFlow(); otpCode = "" }, enabled = !otpBusy) {
-                            Text("Change number", fontSize = 12.sp)
+                            Text("Change number", fontSize = 12.sp, maxLines = 1, softWrap = false)
                         }
                     }
                 }

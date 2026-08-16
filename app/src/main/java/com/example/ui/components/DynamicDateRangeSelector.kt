@@ -150,7 +150,7 @@ fun DynamicDateRangeSelector(
             ) {
                 Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(14.dp))
                 Spacer(modifier = Modifier.width(4.dp))
-                Text("Change", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                Text("Change", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
             }
         }
     }
@@ -293,11 +293,11 @@ fun DynamicDateRangeSelector(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Apply Filter")
+                    Text("Apply Filter", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showDialog = false }) { Text("Cancel") }
+                TextButton(onClick = { showDialog = false }) { Text("Cancel", maxLines = 1, softWrap = false) }
             }
         )
     }

@@ -218,11 +218,11 @@ fun QrCodeScannerDialog(
                                         modifier = Modifier.size(16.dp)
                                     )
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Reading invoice…", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("Reading invoice…", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
                                 } else {
                                     Icon(Icons.Default.UploadFile, contentDescription = null, tint = OnNeon, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text("Import invoice PDF", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                    Text("Import invoice PDF", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 12.sp, maxLines = 1, softWrap = false)
                                 }
                             }
                             Spacer(modifier = Modifier.height(6.dp))
@@ -459,7 +459,7 @@ fun QrCodeScannerDialog(
                                     colors = ButtonDefaults.buttonColors(containerColor = ConsoleAccent),
                                     modifier = Modifier.fillMaxWidth()
                                 ) {
-                                    Text("Save Voucher", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                                    Text("Save Voucher", color = OnNeon, fontWeight = FontWeight.Bold, fontSize = 11.sp, maxLines = 1, softWrap = false)
                                 }
 
                                 if (!canSubmit) {

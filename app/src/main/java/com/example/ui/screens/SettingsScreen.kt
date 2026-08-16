@@ -249,7 +249,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Numbers, contentDescription = null, modifier = Modifier.size(18.dp), tint = RoyalPurplePrimary)
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("Configure Voucher Numbering & Prefixes", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
+                        Text("Voucher Numbering", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary, maxLines = 1, softWrap = false)
                     }
 
                     Spacer(modifier = Modifier.height(14.dp))
@@ -300,7 +300,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, tint = OnAccent)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Create New Stock Item", color = OnAccent, fontWeight = FontWeight.Bold)
+                            Text("New Item", color = OnAccent, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -489,12 +489,12 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                             shape = RoundedCornerShape(12.dp)
                         ) {
-                            Text("Export CSV/PDF")
+                            Text("Export CSV/PDF", maxLines = 1, softWrap = false)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { showExportLedgerDialog = false }) {
-                            Text("Cancel")
+                            Text("Cancel", maxLines = 1, softWrap = false)
                         }
                     }
                 )
@@ -534,7 +534,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export CSV/PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Export CSV/PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         OutlinedButton(
@@ -544,7 +544,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Draw, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Signature Pad", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Signature Pad", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -593,7 +593,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Export Tally XML", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Export Tally XML", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         Button(
@@ -607,7 +607,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Export Marg ERP", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Export Marg ERP", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -656,12 +656,12 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Share JSON Payload")
+                            Text("Share JSON", maxLines = 1, softWrap = false)
                         }
                     },
                     dismissButton = {
                         TextButton(onClick = { showJsonModalText = null }) {
-                            Text("Close")
+                            Text("Close", maxLines = 1, softWrap = false)
                         }
                     }
                 )
@@ -705,7 +705,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("User Analytics JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("User Analytics JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         OutlinedButton(
@@ -718,7 +718,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.BugReport, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Crash Diagnostics JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Crash Diagnostics JSON", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
 
@@ -746,7 +746,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.CleaningServices, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Optimize Database Storage (Archive >30 Days)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Optimize Database Storage (Archive >30 Days)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
 
                     Spacer(modifier = Modifier.height(6.dp))
@@ -770,7 +770,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Sync Room Telemetry to REST API (Retrofit + Retry)", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Sync Room Telemetry to REST API (Retrofit + Retry)", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
 
                     if (maintenanceStatus.isNotBlank()) {
@@ -857,7 +857,7 @@ fun SettingsScreen(
                                 Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
                             }
-                            Text("Sync Books", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Sync Books", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         OutlinedButton(
@@ -868,7 +868,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Restore Books", fontSize = 12.sp)
+                            Text("Restore Books", fontSize = 12.sp, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -948,7 +948,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.CompareArrows, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Open Service", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Text("Open Service", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -1054,7 +1054,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Back Up Now", fontSize = 11.sp)
+                            Text("Back Up Now", fontSize = 11.sp, maxLines = 1, softWrap = false)
                         }
                     }
 
@@ -1075,7 +1075,7 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Restore, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Restore From a Backup on This Device", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Restore From a Backup on This Device", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -1116,7 +1116,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Import JSON")
+                            Text("Import JSON", maxLines = 1, softWrap = false)
                         }
                         Button(
                             onClick = {
@@ -1131,7 +1131,7 @@ fun SettingsScreen(
                         ) {
                             Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Export JSON")
+                            Text("Export JSON", maxLines = 1, softWrap = false)
                         }
                     }
                 }
@@ -1152,7 +1152,7 @@ fun SettingsScreen(
             ) {
                 Icon(Icons.Default.ExitToApp, contentDescription = null, tint = OnAccent)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Logout Account", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OnAccent)
+                Text("Logout Account", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OnAccent, maxLines = 1, softWrap = false)
             }
         }
     }
@@ -1255,7 +1255,7 @@ fun SettingsScreen(
                         },
                         shape = RoundedCornerShape(12.dp)
                     ) {
-                        Text("Copy JSON", fontSize = 11.sp)
+                        Text("Copy JSON", fontSize = 11.sp, maxLines = 1, softWrap = false)
                     }
 
                     Button(
@@ -1278,13 +1278,13 @@ fun SettingsScreen(
                     ) {
                         Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Share Backup File", fontSize = 11.sp)
+                        Text("Share Backup File", fontSize = 11.sp, maxLines = 1, softWrap = false)
                     }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showExportJsonDialog = false }) {
-                    Text("Close")
+                    Text("Close", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1328,12 +1328,12 @@ fun SettingsScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Restore Database")
+                    Text("Restore Database", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showImportJsonDialog = false }) {
-                    Text("Cancel")
+                    Text("Cancel", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1380,7 +1380,7 @@ fun SettingsScreen(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showRestoreBackupDialog = false }) { Text("Close") }
+                TextButton(onClick = { showRestoreBackupDialog = false }) { Text("Close", maxLines = 1, softWrap = false) }
             }
         )
     }
@@ -1407,10 +1407,10 @@ fun SettingsScreen(
                         }
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccountingRed)
-                ) { Text("Replace My Books") }
+                ) { Text("Replace Books", maxLines = 1, softWrap = false) }
             },
             dismissButton = {
-                TextButton(onClick = { backupPendingConfirm = null }) { Text("Cancel") }
+                TextButton(onClick = { backupPendingConfirm = null }) { Text("Cancel", maxLines = 1, softWrap = false) }
             }
         )
     }
@@ -1718,12 +1718,12 @@ fun EditProfileDialog(
                 },
                 colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
             ) {
-                Text("Save Profile")
+                Text("Save Profile", maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Cancel", maxLines = 1, softWrap = false)
             }
         }
     )
@@ -1792,7 +1792,7 @@ fun GstCertificateModal(
         },
         confirmButton = {
             Button(onClick = onDismiss, colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)) {
-                Text("Close Certificate")
+                Text("Close Certificate", maxLines = 1, softWrap = false)
             }
         }
     )
@@ -1843,11 +1843,11 @@ fun AddStockItemDialog(
                 onClick = { onConfirm(name, unit, hsn, gstRate, cost, price, openingQty) },
                 colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
             ) {
-                Text("Save Item")
+                Text("Save Item", maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            TextButton(onClick = onDismiss) { Text("Cancel", maxLines = 1, softWrap = false) }
         }
     )
 }

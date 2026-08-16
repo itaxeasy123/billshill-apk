@@ -176,11 +176,11 @@ fun LedgerReconciliationModal(
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Scanning...", fontSize = 11.sp)
+                                    Text("Scanning...", fontSize = 11.sp, maxLines = 1, softWrap = false)
                                 } else {
                                     Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(14.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Run Reconcile", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Run Reconcile", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -354,7 +354,7 @@ fun LedgerReconciliationModal(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Close Window", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp)
+                    Text("Close Window", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 12.sp, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -404,7 +404,7 @@ fun LedgerReconciliationModal(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("confirm_resolve_discrepancy_btn")
                 ) {
-                    Text("Mark Resolved", color = OnAccent, fontWeight = FontWeight.Bold)
+                    Text("Mark Resolved", color = OnAccent, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
@@ -415,7 +415,7 @@ fun LedgerReconciliationModal(
                     },
                     shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Cancel")
+                    Text("Cancel", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -549,7 +549,7 @@ fun DiscrepancyItemCard(
                     ) {
                         Icon(Icons.Default.Done, contentDescription = null, modifier = Modifier.size(14.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Mark Resolved", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Mark Resolved", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             } else {

@@ -9,6 +9,7 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -102,15 +103,33 @@ class MainActivity : ComponentActivity() {
                         )
                     }
 
+                    // One list state per FAB-bearing screen, owned here because the
+                    // Scaffold's FAB is what reacts to it.
+                    val dashboardListState = rememberLazyListState()
+                    val reportsListState = rememberLazyListState()
+
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         floatingActionButton = {
-                            if (currentRoute == NavItem.Dashboard.route || currentRoute == NavItem.Reports.route) {
+                            val onDashboard = currentRoute == NavItem.Dashboard.route
+                            val onReports = currentRoute == NavItem.Reports.route
+                            if (onDashboard || onReports) {
+                                // Extended only at the top of the list, an icon once
+                                // scrolled. Permanently extended, it is ~200dp wide and
+                                // parked over the content: on the dashboard it covered two
+                                // of the four Quick Action tiles, and on Reports the net
+                                // profit figure. Collapsing on scroll is the Material
+                                // behaviour for exactly this reason.
+                                val listState = if (onDashboard) dashboardListState else reportsListState
+                                val atTop by remember(listState) {
+                                    derivedStateOf { !listState.canScrollBackward }
+                                }
                                 ExtendedFloatingActionButton(
                                     onClick = {
                                         activeVoucherType = VoucherType.SALES
                                         currentRoute = NavItem.Vouchers.route
                                     },
+                                    expanded = atTop,
                                     icon = { Icon(Icons.Default.Add, contentDescription = "New Voucher") },
                                     text = { Text("New Voucher", fontWeight = FontWeight.Bold) },
                                     containerColor = RoyalPurplePrimary,
@@ -142,6 +161,7 @@ class MainActivity : ComponentActivity() {
                                 NavItem.Dashboard.route -> DashboardScreen(
                                     viewModel = viewModel,
                                     user = user,
+                                    listState = dashboardListState,
                                     onNavigateToVouchers = { vType ->
                                         // Cleared so a prefill from an earlier calculator
                                         // run cannot re-seed an unrelated later entry.
@@ -163,7 +183,8 @@ class MainActivity : ComponentActivity() {
                                 )
                                 NavItem.Reports.route -> ReportsScreen(
                                     viewModel = viewModel,
-                                    user = user
+                                    user = user,
+                                    listState = reportsListState
                                 )
                                 NavItem.Settings.route -> SettingsScreen(
                                     viewModel = viewModel,

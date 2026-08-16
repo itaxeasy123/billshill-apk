@@ -8,7 +8,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
@@ -98,7 +100,12 @@ fun DashboardScreen(
     user: UserEntity,
     onNavigateToVouchers: (VoucherType) -> Unit,
     /** Defaulted so the existing onNavigateToVouchers call sites are untouched. */
-    onNavigateToVouchersWithGst: ((VoucherType, VoucherGstPrefill) -> Unit)? = null
+    onNavigateToVouchersWithGst: ((VoucherType, VoucherGstPrefill) -> Unit)? = null,
+    /**
+     * Hoisted so the Scaffold's extended FAB can collapse once this list scrolls.
+     * Defaulted, so nothing else that calls this screen has to know about it.
+     */
+    listState: LazyListState = rememberLazyListState()
 ) {
     val allLedgersForEntry by viewModel.ledgersState.collectAsState()
     // As on the end of the selected period — the FY chip sits inside this card and
@@ -230,6 +237,7 @@ fun DashboardScreen(
     val totalContra = contraVouchers.sumOf { it.totalAmount }
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp)
@@ -573,7 +581,7 @@ fun DashboardScreen(
                                     colors = ButtonDefaults.buttonColors(containerColor = AccountingRed),
                                     contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
-                                    Text("Review", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent)
+                                    Text("Review", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -827,7 +835,7 @@ fun DashboardScreen(
                         ) {
                             Icon(Icons.Default.AccountBalance, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Manage Ledgers", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Manage Ledgers", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
 
                         Button(
@@ -838,7 +846,7 @@ fun DashboardScreen(
                         ) {
                             Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Car / Loan / Expense", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                            Text("Car / Loan / Expense", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                         }
                     }
                     Spacer(modifier = Modifier.height(16.dp))
@@ -937,7 +945,7 @@ fun DashboardScreen(
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Text("+ New Sale", fontSize = 12.sp)
+                                    Text("+ New Sale", fontSize = 12.sp, maxLines = 1, softWrap = false)
                                 }
                             }
                             Spacer(modifier = Modifier.height(16.dp))
@@ -994,7 +1002,7 @@ fun DashboardScreen(
                                     contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
                                 ) {
                                     Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                                    Text("+ Purchase", fontSize = 12.sp)
+                                    Text("+ Purchase", fontSize = 12.sp, maxLines = 1, softWrap = false)
                                 }
                             }
                             Spacer(modifier = Modifier.height(16.dp))
@@ -1148,7 +1156,7 @@ fun DashboardScreen(
                                     shape = RoundedCornerShape(16.dp),
                                     modifier = Modifier.height(56.dp).testTag("save_petty_cash_btn")
                                 ) {
-                                    Text("Log", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Log", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
 
@@ -1339,7 +1347,7 @@ fun DashboardScreen(
                                                 com.example.utils.ReminderPermissions.openExactAlarmSettings(context)
                                             }
                                             reminderPermissionIssue = null
-                                        }) { Text("Open settings to allow it", fontSize = 11.sp) }
+                                        }) { Text("Open Settings", fontSize = 11.sp, maxLines = 1, softWrap = false) }
                                     }
                                 }
                             }
@@ -1378,7 +1386,7 @@ fun DashboardScreen(
                             ) {
                                 Icon(Icons.Default.Alarm, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Set Local Device Alarm Reminder", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                Text("Set Local Device Alarm Reminder", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -1473,7 +1481,7 @@ fun DashboardScreen(
                                     ) {
                                         Icon(Icons.Default.SwapHoriz, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Contra", fontSize = 11.sp)
+                                        Text("Contra", fontSize = 11.sp, maxLines = 1, softWrap = false)
                                     }
                                     Button(
                                         onClick = { showEasyEntryModal = true },
@@ -1482,7 +1490,7 @@ fun DashboardScreen(
                                     ) {
                                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(16.dp))
                                         Spacer(modifier = Modifier.width(4.dp))
-                                        Text("Easy Assistant", fontSize = 11.sp)
+                                        Text("Easy Assistant", fontSize = 11.sp, maxLines = 1, softWrap = false)
                                     }
                                 }
                             }
@@ -1622,11 +1630,11 @@ fun DashboardScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Record Entry")
+                    Text("Record Entry", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showEasyEntryModal = false }) { Text("Cancel") }
+                TextButton(onClick = { showEasyEntryModal = false }) { Text("Cancel", maxLines = 1, softWrap = false) }
             }
         )
     }
@@ -1689,11 +1697,11 @@ fun DashboardScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Transfer Now")
+                    Text("Transfer Now", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showContraModal = false }) { Text("Cancel") }
+                TextButton(onClick = { showContraModal = false }) { Text("Cancel", maxLines = 1, softWrap = false) }
             }
         )
     }
@@ -1739,7 +1747,7 @@ fun DashboardScreen(
                     }
                 }
             },
-            confirmButton = { TextButton(onClick = { showCashBankDialog = false }) { Text("Close") } }
+            confirmButton = { TextButton(onClick = { showCashBankDialog = false }) { Text("Close", maxLines = 1, softWrap = false) } }
         )
     }
 
@@ -2185,7 +2193,7 @@ fun DocumentExtractImportSection(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).testTag("import_valid_only_btn")
                 ) {
-                    Text("Import Valid Only (${validCount})", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Import Valid Only (${validCount})", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
 
                 Button(
@@ -2222,7 +2230,7 @@ fun DocumentExtractImportSection(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.weight(1f).testTag("auto_fix_import_btn")
                 ) {
-                    Text("Auto-Fix & Import", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Auto-Fix & Import", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
             }
 
@@ -2972,7 +2980,7 @@ fun GstFilingScheduleModal(
                     shape = RoundedCornerShape(14.dp),
                     modifier = Modifier.fillMaxWidth().height(48.dp)
                 ) {
-                    Text("Close Compliance Calendar", fontWeight = FontWeight.Bold)
+                    Text("Close", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
             }
         }

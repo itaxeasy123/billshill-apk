@@ -7,7 +7,9 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,7 +57,9 @@ import kotlinx.coroutines.launch
 @Composable
 fun ReportsScreen(
     viewModel: AccountingViewModel,
-    user: UserEntity
+    user: UserEntity,
+    /** Hoisted so the Scaffold's extended FAB can collapse once this list scrolls. */
+    listState: LazyListState = rememberLazyListState()
 ) {
     var dateRangeState by remember { mutableStateOf(DateRangeFilterState()) }
     var selectedReportTab by remember { mutableStateOf(0) }
@@ -163,6 +167,7 @@ fun ReportsScreen(
     val cashBankTrend by viewModel.cashBankTrendState.collectAsState()
 
     LazyColumn(
+        state = listState,
         modifier = Modifier
             .fillMaxSize()
             .padding(horizontal = 20.dp)
@@ -286,7 +291,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Assessment, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Full Report", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                    Text("Full Report", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -325,7 +330,7 @@ fun ReportsScreen(
                             ) {
                                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(4.dp))
-                                Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
 
@@ -680,7 +685,7 @@ fun ReportsScreen(
                             Text("Statement of Profit & Loss", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             ExportDataButton(
                                 viewModel = viewModel,
-                                label = "Export P&L Data"
+                                label = "Export"
                             )
                         }
 
@@ -710,7 +715,7 @@ fun ReportsScreen(
                             Text("Real-Time Balance Sheet", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             ExportDataButton(
                                 viewModel = viewModel,
-                                label = "Export B/S Data"
+                                label = "Export"
                             )
                         }
 
@@ -809,7 +814,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
 
                                 Button(
@@ -825,7 +830,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export Text Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export text", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
 
@@ -968,7 +973,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export Tally XML", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Tally XML", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
 
                                 Button(
@@ -981,7 +986,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export Marg XML", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Marg XML", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
 
@@ -1019,7 +1024,7 @@ fun ReportsScreen(
                             ) {
                                 Icon(Icons.Default.Upload, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Text("Parse & Reconcile XML Records", fontWeight = FontWeight.Bold)
+                                Text("Parse XML", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                             }
                         }
                     }
@@ -1040,7 +1045,7 @@ fun ReportsScreen(
                             Text("Cash Flow Statement", fontSize = 16.sp, fontWeight = FontWeight.Bold)
                             ExportDataButton(
                                 viewModel = viewModel,
-                                label = "Export Cash Flow"
+                                label = "Export"
                             )
                         }
 
@@ -1146,7 +1151,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
 
                                 Button(
@@ -1185,7 +1190,7 @@ fun ReportsScreen(
                                 ) {
                                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Export Text Report", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                    Text("Export text", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 }
                             }
 
@@ -1243,7 +1248,7 @@ fun ReportsScreen(
                                         ) {
                                             Icon(Icons.Default.Psychology, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Parse AI Note", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Text("Parse Note", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         }
 
                                         Button(
@@ -1270,7 +1275,7 @@ fun ReportsScreen(
                                         ) {
                                             Icon(Icons.Default.CloudSync, contentDescription = null, modifier = Modifier.size(16.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("Auto Export GST", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                                            Text("Export GST", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         }
                                     }
 
@@ -1588,10 +1593,10 @@ fun ReportsScreen(
                     ) {
                         Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Export PDF", fontSize = 12.sp)
+                        Text("Export PDF", fontSize = 12.sp, maxLines = 1, softWrap = false)
                     }
                     TextButton(onClick = { selectedLedgerForStatement = null }) {
-                        Text("Close")
+                        Text("Close", maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -1647,7 +1652,7 @@ fun ReportsScreen(
                     ) {
                         Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("PDF")
+                        Text("PDF", maxLines = 1, softWrap = false)
                     }
                     Button(
                         onClick = {
@@ -1676,7 +1681,7 @@ fun ReportsScreen(
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                     ) {
-                        Text("Save")
+                        Text("Save", maxLines = 1, softWrap = false)
                     }
                 }
             },
@@ -1694,10 +1699,10 @@ fun ReportsScreen(
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = AccountingRed)
                     ) {
-                        Text("Delete")
+                        Text("Delete", maxLines = 1, softWrap = false)
                     }
                     TextButton(onClick = { editingVoucherInStatement = null }) {
-                        Text("Cancel")
+                        Text("Cancel", maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -1734,12 +1739,12 @@ fun ReportsScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Copy XML Payload")
+                    Text("Copy XML Payload", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { xmlExportModalContent = null }) {
-                    Text("Close")
+                    Text("Close", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1877,11 +1882,11 @@ fun ReportsScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Commit Import")
+                    Text("Commit Import", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showConflictResolutionModal = false }) { Text("Cancel") }
+                TextButton(onClick = { showConflictResolutionModal = false }) { Text("Cancel", maxLines = 1, softWrap = false) }
             }
         )
     }

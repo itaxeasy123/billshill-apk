@@ -449,7 +449,7 @@ fun VouchersScreen(
                                     .height(48.dp)
                                     .testTag("step1_next_btn")
                             ) {
-                                Text("Next: Financials & Tax", fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                Text("Next: Financials", fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                             }
@@ -671,16 +671,20 @@ fun VouchersScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                // Not weighted: at weight(1f) against the primary action
+                                // Back got ~96dp, and a Button's own content padding eats
+                                // 48dp of that, leaving ~28dp for a ~30dp word -- so it
+                                // rendered as "Bac / k". It now takes the width it needs and
+                                // the primary action absorbs the remainder.
                                 OutlinedButton(
                                     onClick = { currentStep = 1 },
                                     shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    modifier = Modifier.height(48.dp)
                                 ) {
                                     Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Back", fontSize = 13.sp)
+                                    Text("Back", fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
 
                                 Button(
@@ -688,11 +692,11 @@ fun VouchersScreen(
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                                     modifier = Modifier
-                                        .weight(1.5f)
+                                        .weight(1f)
                                         .height(48.dp)
                                         .testTag("step2_next_btn")
                                 ) {
-                                    Text("Next: Review & Save", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                                    Text("Next: Review", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Icon(Icons.Default.ArrowForward, contentDescription = null, modifier = Modifier.size(16.dp))
                                 }
@@ -792,16 +796,20 @@ fun VouchersScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
+                                // Not weighted: at weight(1f) against the primary action
+                                // Back got ~96dp, and a Button's own content padding eats
+                                // 48dp of that, leaving ~28dp for a ~30dp word -- so it
+                                // rendered as "Bac / k". It now takes the width it needs and
+                                // the primary action absorbs the remainder.
                                 OutlinedButton(
                                     onClick = { currentStep = 2 },
                                     shape = RoundedCornerShape(14.dp),
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(48.dp)
+                                    contentPadding = PaddingValues(horizontal = 16.dp),
+                                    modifier = Modifier.height(48.dp)
                                 ) {
                                     Icon(Icons.Default.ArrowBack, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("Back", fontSize = 13.sp)
+                                    Text("Back", fontSize = 13.sp, maxLines = 1, softWrap = false)
                                 }
 
                                 Button(
@@ -846,13 +854,13 @@ fun VouchersScreen(
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary),
                                     modifier = Modifier
-                                        .weight(2f)
+                                        .weight(1f)
                                         .height(48.dp)
                                         .testTag("submit_voucher_button")
                                 ) {
                                     Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = OnAccent)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Save Voucher", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnAccent)
+                                    Text("Save Voucher", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnAccent, maxLines = 1, softWrap = false)
                                 }
                             }
                         }
@@ -895,7 +903,7 @@ fun VouchersScreen(
                 ) {
                     Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(modifier = Modifier.width(4.dp))
-                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    Text("Export CSV", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                 }
             }
             Spacer(modifier = Modifier.height(12.dp))
@@ -1139,7 +1147,7 @@ fun VouchersScreen(
                                         ) {
                                             Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(13.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("PDF", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                            Text("PDF", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         }
 
                                         if (voucher.voucherType == VoucherType.SALES) {
@@ -1150,7 +1158,7 @@ fun VouchersScreen(
                                             ) {
                                                 Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Pay Link", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("Pay Link", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                             }
 
                                             FilledTonalButton(
@@ -1160,7 +1168,7 @@ fun VouchersScreen(
                                             ) {
                                                 Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Print Bill", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("Print Bill", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                             }
                                         }
 
@@ -1209,12 +1217,12 @@ fun VouchersScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccountingRed)
                 ) {
-                    Text("Delete", color = OnAccent)
+                    Text("Delete", color = OnAccent, maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
                 OutlinedButton(onClick = { voucherToDeleteConfirm = null }) {
-                    Text("Cancel")
+                    Text("Cancel", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1338,14 +1346,14 @@ fun VouchersScreen(
                         ) {
                             Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Share Payment Link")
+                            Text("Share Payment Link", maxLines = 1, softWrap = false)
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { qrVoucher = null }) {
-                    Text("Close")
+                    Text("Close", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1420,7 +1428,7 @@ fun VouchersScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
                 ) {
-                    Text("Update Voucher")
+                    Text("Update Voucher", maxLines = 1, softWrap = false)
                 }
             },
             dismissButton = {
@@ -1432,10 +1440,10 @@ fun VouchersScreen(
                         },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = AccountingRed)
                     ) {
-                        Text("Delete")
+                        Text("Delete", maxLines = 1, softWrap = false)
                     }
                     TextButton(onClick = { editingVoucher = null }) {
-                        Text("Cancel")
+                        Text("Cancel", maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -1468,7 +1476,7 @@ fun VouchersScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showContactsDialog = false }) {
-                    Text("Close")
+                    Text("Close", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1520,14 +1528,14 @@ fun VouchersScreen(
                         ) {
                             Icon(Icons.Default.Star, contentDescription = null)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Save '$partyName' as Favorite")
+                            Text("Save '$partyName' as Favorite", maxLines = 1, softWrap = false)
                         }
                     }
                 }
             },
             confirmButton = {
                 TextButton(onClick = { showFavoritesDialog = false }) {
-                    Text("Close")
+                    Text("Close", maxLines = 1, softWrap = false)
                 }
             }
         )
@@ -1664,11 +1672,11 @@ private fun VoucherFormGstCalculator(
                 onClick = { onApply(calcAmountText, calcGstRate, calcIsInclusive) },
                 colors = ButtonDefaults.buttonColors(containerColor = RoyalPurplePrimary)
             ) {
-                Text("Apply to Voucher")
+                Text("Apply to Voucher", maxLines = 1, softWrap = false)
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close") }
+            TextButton(onClick = onDismiss) { Text("Close", maxLines = 1, softWrap = false) }
         }
     )
 }
