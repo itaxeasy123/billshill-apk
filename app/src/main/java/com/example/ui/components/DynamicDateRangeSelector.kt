@@ -117,7 +117,7 @@ fun DynamicDateRangeSelector(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                 Icon(
                     imageVector = Icons.Default.CalendarMonth,
                     contentDescription = null,
@@ -174,17 +174,16 @@ fun DynamicDateRangeSelector(
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Select timeframe for GST, Balance Sheet & P&L calculations:", fontSize = 12.sp)
 
-                    // Type Selector Tabs
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
+                    // Type Selector Tabs. "Financial Year" and "Custom Range" do not fit
+                    // in a quarter of a dialog's width, so they wrap to a second line
+                    // rather than breaking mid-word.
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp, verticalSpacing = 6.dp) {
                         DateRangeType.values().forEach { type ->
-                            FilterChip(
+                            ChoiceChip(
+                                label = type.label,
                                 selected = tempType == type,
                                 onClick = { tempType = type },
-                                label = { Text(type.label, fontSize = 10.sp) },
-                                modifier = Modifier.weight(1f)
+                                fontSize = 11.sp
                             )
                         }
                     }
@@ -239,22 +238,22 @@ fun DynamicDateRangeSelector(
                                     )
                                 }
                             }
+                            // A fixed three-per-row grid gave each chip ~85dp, which
+                            // "September" only just fits at the default font scale and
+                            // does not fit above it.
                             Text("Select Month:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                            Column {
-                                monthOptions.chunked(3).forEach { chunk ->
-                                    Row(
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        chunk.forEach { m ->
-                                            FilterChip(
-                                                selected = tempMonth == m,
-                                                onClick = { tempMonth = m },
-                                                label = { Text(m, fontSize = 10.sp) },
-                                                modifier = Modifier.weight(1f)
-                                            )
-                                        }
-                                    }
+                            ChoiceChipRow(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalSpacing = 6.dp,
+                                verticalSpacing = 6.dp
+                            ) {
+                                monthOptions.forEach { m ->
+                                    ChoiceChip(
+                                        label = m,
+                                        selected = tempMonth == m,
+                                        onClick = { tempMonth = m },
+                                        fontSize = 11.sp
+                                    )
                                 }
                             }
                         }

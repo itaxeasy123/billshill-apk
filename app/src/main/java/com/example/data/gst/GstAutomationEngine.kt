@@ -6,6 +6,9 @@ import android.util.Log
 import com.example.ai.LocalAiReconciliationEngine
 import com.example.data.db.AppDatabase
 import com.example.utils.GstCalculationService
+import com.example.utils.IndianFormatter
+import com.example.utils.FiscalYearUtils
+import com.example.utils.Money
 import com.example.data.model.VoucherEntity
 import com.example.data.model.VoucherType
 import com.example.utils.TelemetryEngine
@@ -94,14 +97,25 @@ object GstAutomationEngine {
             val periodStart = periodBounds.timeInMillis
             val periodEnd = periodBounds.apply { add(Calendar.MONTH, 1) }.timeInMillis - 1
 
-            val allVouchers = accountingDao.getAllVouchersSync()
+            val everyVoucherInBook = accountingDao.getAllVouchersSync()
+            val allVouchers = everyVoucherInBook
                 .filter { it.date in periodStart..periodEnd }
                 // Oldest first, so the document series in docIssue runs forwards. The DAO
                 // returns newest-first, which made `from` the newest invoice and `to` the
                 // oldest — a declared range running backwards.
                 .sortedBy { it.date }
-            val salesVouchers = allVouchers.filter { it.voucherType == VoucherType.SALES || it.voucherType == VoucherType.Sale }
-            val purchaseVouchers = allVouchers.filter { it.voucherType == VoucherType.PURCHASE || it.voucherType == VoucherType.Purchase }
+            val salesVouchers = allVouchers.filter { it.voucherType == VoucherType.SALES }
+            val purchaseVouchers = allVouchers.filter { it.voucherType == VoucherType.PURCHASE }
+            // Neither of these was ever bound to a variable, so credit notes reached no
+            // GSTR-1 table and purchase returns reversed no ITC. The books net both
+            // (getGstSummaryFlow) — only the filed return did not.
+            //
+            // They are kept in SEPARATE lists rather than merged into the two above: a
+            // credit note is stored with POSITIVE amounts, with the reversal carried by
+            // which legs are debited. Merging would have added them to outward liability
+            // instead of subtracting, declaring the tax on returned goods twice.
+            val creditNoteVouchers = allVouchers.filter { it.voucherType == VoucherType.SALES_RETURN }
+            val purchaseReturnVouchers = allVouchers.filter { it.voucherType == VoucherType.PURCHASE_RETURN }
 
             Log.d(TAG, "Found ${salesVouchers.size} sales vouchers and ${purchaseVouchers.size} purchase vouchers.")
 
@@ -148,9 +162,11 @@ object GstAutomationEngine {
                 // The posting is the record; the return reports it.
                 val isInterstate = voucher.isInterstate
 
-                // Calculate & Normalize Taxable Value
-                var taxableVal = voucher.totalAmount - voucher.gstAmount
-                var totalGst = voucher.gstAmount
+                // Quantised, because every monetary field in the GSTR schema is capped at
+                // two decimals and the portal rejects anything longer. A raw subtraction
+                // put values like 762.7118644067797 into txval.
+                var taxableVal = GstCalculationService.taxableValueOf(voucher.totalAmount, voucher.gstAmount)
+                var totalGst = Money.paise(voucher.gstAmount)
 
                 // Guardrail: Normalize negative values to 0.0 & log telemetry
                 if (taxableVal < 0 || totalGst < 0) {
@@ -161,12 +177,13 @@ object GstAutomationEngine {
                     totalGst = normalizeToZero(totalGst)
                 }
 
-                // Automated Tax Splitting Rules
-                val split = if (isInterstate) {
-                    TaxSplit(cgst = 0.0, sgst = 0.0, igst = totalGst) // 100% IGST
-                } else {
-                    TaxSplit(cgst = totalGst / 2.0, sgst = totalGst / 2.0, igst = 0.0) // 50-50 CGST & SGST
-                }
+                // Was totalGst / 2.0 twice: an 180.01 tax emitted camt 90.005 and samt
+                // 90.005 — three decimals into a two-decimal field, rejected by the portal,
+                // and disagreeing with the invoice issued to the customer. The shared split
+                // is the one the ledger legs and the printed invoice both use.
+                val (cgstShare, sgstShare, igstShare) =
+                    GstCalculationService.splitForVoucher(totalGst, isInterstate)
+                val split = TaxSplit(cgst = cgstShare, sgst = sgstShare, igst = igstShare)
 
                 totalSalesTaxable += taxableVal
                 totalSalesCgst += split.cgst
@@ -288,6 +305,105 @@ object GstAutomationEngine {
                 }
             }
 
+            // --- GSTR-1 Table 9B: credit notes ---
+            //
+            // GSTR-1 and GSTR-3B treat a credit note in OPPOSITE ways, which is why this
+            // is a separate loop rather than a sign flip in the one above. In GSTR-1 the
+            // note is its own record in 9B and Table 4A stays GROSS; in GSTR-3B it is a
+            // net reduction of 3.1(a). One set of accumulators cannot serve both.
+            //
+            // Values here are POSITIVE and ntty="C" carries the direction — the portal
+            // subtracts. That is also how this app stores a return.
+            val cdnrMap = mutableMapOf<String, MutableList<Gstr1CreditNote>>()
+            val cdnurNotes = mutableListOf<Gstr1CdnurNote>()
+            var creditNotesNettedIntoB2cs = 0
+
+            creditNoteVouchers.forEach { voucher ->
+                val partyLedger = accountingDao.getLedgerByName(voucher.partyName)
+                val partyGstin = partyLedger?.gstin?.trim() ?: ""
+
+                val posStateCode = if (partyGstin.length >= 2 && partyGstin.substring(0, 2).all { it.isDigit() }) {
+                    partyGstin.substring(0, 2)
+                } else if (partyLedger?.state?.isNotBlank() == true) {
+                    getStateCodeFromStateName(partyLedger.state)
+                        ?: throw IllegalStateException(
+                            "GST export aborted: party '${voucher.partyName}' (credit note #${voucher.voucherNo}) has an unrecognised state '${partyLedger.state}'. " +
+                                "Correct the state on that ledger before exporting."
+                        )
+                } else {
+                    clientStateCode
+                }
+
+                val tax = GstReturnAggregator.taxOf(voucher)
+                if (tax.wasNegative) {
+                    val note = "Negative value in Credit Note #${voucher.voucherNo}. Normalizing."
+                    Log.w(TAG, note)
+                    TelemetryEngine.recordThrowable(context, IllegalArgumentException(note), "GST_EXPORT_GUARDRAIL")
+                }
+
+                val items = listOf(
+                    Gstr1InvoiceItem(
+                        num = 1,
+                        itmDet = Gstr1ItmDet(
+                            rt = tax.rate,
+                            txval = tax.taxable,
+                            iamt = tax.igst,
+                            camt = tax.cgst,
+                            samt = tax.sgst,
+                            csamt = 0.0
+                        )
+                    )
+                )
+                val noteNo = LocalAiReconciliationEngine.sanitizeInvoiceNumber(voucher.voucherNo)
+                val noteDate = SimpleDateFormat("dd-MM-yyyy", Locale.US).format(Date(voucher.date))
+
+                // Routed through the shared classifier. A note to an unregistered party
+                // must never reach CDNR: it would emit `"ctin": ""` and the portal rejects
+                // the whole upload. CDNUR's typ enum has no B2CS member, so a small B2C
+                // note has no note table at all and nets into Table 7 instead.
+                when (GstReturnAggregator.tableFor(partyGstin, voucher)) {
+                    GstReturnAggregator.NoteTable.CDNR ->
+                        cdnrMap.getOrPut(partyGstin) { mutableListOf() }.add(
+                            Gstr1CreditNote(
+                                ntNum = noteNo,
+                                ntDt = noteDate,
+                                pos = posStateCode,
+                                valAmt = Money.paise(voucher.totalAmount),
+                                itms = items
+                            )
+                        )
+
+                    GstReturnAggregator.NoteTable.CDNUR ->
+                        cdnurNotes.add(
+                            Gstr1CdnurNote(
+                                ntNum = noteNo,
+                                ntDt = noteDate,
+                                pos = posStateCode,
+                                valAmt = Money.paise(voucher.totalAmount),
+                                itms = items
+                            )
+                        )
+
+                    GstReturnAggregator.NoteTable.NETS_INTO_B2CS -> {
+                        val supplyType = if (voucher.isInterstate) "INTER" else "INTRA"
+                        val key = Triple(supplyType, posStateCode, tax.rate)
+                        val prev = b2csAccumulator[key]
+                        // Subtracted, not added. Clamped at zero and reported: Table 7 is
+                        // rejected on a negative txval, and silently dropping the excess
+                        // would destroy a carry-forward nothing could later detect.
+                        if (prev != null) {
+                            b2csAccumulator[key] = prev.copy(
+                                txval = maxOf(0.0, Money.paise(prev.txval - tax.taxable)),
+                                camt = maxOf(0.0, Money.paise(prev.camt - tax.cgst)),
+                                samt = maxOf(0.0, Money.paise(prev.samt - tax.sgst)),
+                                iamt = maxOf(0.0, Money.paise(prev.iamt - tax.igst))
+                            )
+                        }
+                        creditNotesNettedIntoB2cs++
+                    }
+                }
+            }
+
             val b2bGroups = b2bMap.map { (ctin, invList) -> Gstr1B2bGroup(ctin, invList) }
 
             // Document-issued summary. When there are no sales invoices in the period this
@@ -309,17 +425,84 @@ object GstAutomationEngine {
                     )
                 } else {
                     emptyList()
+                } + if (creditNoteVouchers.isNotEmpty()) {
+                    // Credit notes run their own series (SRN/...), so merging them into the
+                    // invoice range would declare one range spanning INV.. to SRN.. with an
+                    // inflated count. Table 13 enumerates them separately.
+                    listOf(
+                        Gstr1DocDetail(
+                            docNum = 5,
+                            docTyp = "Credit Note",
+                            from = LocalAiReconciliationEngine.sanitizeInvoiceNumber(creditNoteVouchers.first().voucherNo),
+                            to = LocalAiReconciliationEngine.sanitizeInvoiceNumber(creditNoteVouchers.last().voucherNo),
+                            totcnt = creditNoteVouchers.size,
+                            cancel = 0,
+                            netIssue = creditNoteVouchers.size
+                        )
+                    )
+                } else {
+                    emptyList()
                 }
             )
+
+            // `cur_gt` is gross turnover for the CURRENT FY up to and including this period
+            // — April-to-date, cumulative. It was assigned the single month's taxable value,
+            // so a December return declared December's turnover as the year's. This window
+            // the book does cover, so it is computed.
+            val currentFyStart = FiscalYearUtils.fyBounds(FiscalYearUtils.fyStartYearFor(periodEnd)).first
+            val curGtToDate = Money.paise(
+                everyVoucherInBook
+                    .filter { it.voucherType == VoucherType.SALES && it.date in currentFyStart..periodEnd }
+                    .sumOf { GstCalculationService.taxableValueOf(it.totalAmount, it.gstAmount) }
+                    - everyVoucherInBook
+                        .filter { it.voucherType == VoucherType.SALES_RETURN && it.date in currentFyStart..periodEnd }
+                        .sumOf { GstCalculationService.taxableValueOf(it.totalAmount, it.gstAmount) }
+            )
+
+            // `gt` is the PRECEDING financial year's aggregate turnover. It was assigned this
+            // period's taxable value — the same number as cur_gt, which is how the error is
+            // visible in the payload: two fields with different definitions carrying an
+            // identical figure.
+            //
+            // NOT derived. s.2(6) aggregate turnover is PAN-level and includes exempt, export
+            // and non-GST supplies this book does not distinguish, and the book may not span
+            // the previous FY at all. A derived zero would be a DECLARATION, not an omission,
+            // so the export stops and asks — the same guard this engine already applies to a
+            // missing GSTIN.
+            val gtDeclared = userProfile.previousFyAggregateTurnover
+            if (gtDeclared < 0.0) {
+                val prevFyStartYear = FiscalYearUtils.fyStartYearFor(periodEnd) - 1
+                val prevBounds = FiscalYearUtils.fyBounds(prevFyStartYear)
+                val earliestVoucher = everyVoucherInBook.minOfOrNull { it.date }
+                val bookCoversPreviousFy = earliestVoucher != null && earliestVoucher <= prevBounds.first
+                val hint = if (bookCoversPreviousFy) {
+                    val recorded = Money.paise(
+                        everyVoucherInBook
+                            .filter { it.voucherType == VoucherType.SALES && it.date in prevBounds.first..prevBounds.second }
+                            .sumOf { GstCalculationService.taxableValueOf(it.totalAmount, it.gstAmount) }
+                    )
+                    " This book records ${IndianFormatter.formatRupee(recorded)} of taxable outward supplies for that year, " +
+                        "which is a starting point but is not aggregate turnover: that figure is PAN-level across all your " +
+                        "GSTINs and includes exempt, nil-rated and export supplies."
+                } else {
+                    " This book does not cover that year, so the figure cannot be read from your data."
+                }
+                throw IllegalStateException(
+                    "GST export aborted: the previous financial year's aggregate turnover is not set. " +
+                        "Enter it under Settings before exporting a GSTR-1 payload.$hint"
+                )
+            }
 
             val gstr1Payload = Gstr1Payload(
                 gstin = clientGstin,
                 fp = currentPeriod,
-                gt = totalSalesTaxable,
-                curGt = totalSalesTaxable,
+                gt = Money.paise(gtDeclared),
+                curGt = curGtToDate,
                 b2b = b2bGroups,
                 b2cl = b2clMap.map { (pos, invoices) -> Gstr1B2clGroup(pos = pos, inv = invoices) },
                 b2cs = b2csAccumulator.values.toList(),
+                cdnr = cdnrMap.map { (ctin, notes) -> Gstr1CdnrGroup(ctin, notes) },
+                cdnur = cdnurNotes,
                 hsn = Gstr1HsnData(data = hsnMap.values.toList()),
                 docIssue = docSummary
             )
@@ -347,8 +530,8 @@ object GstAutomationEngine {
                 // The posting is the record; the return reports it.
                 val isInterstate = voucher.isInterstate
 
-                var taxableVal = voucher.totalAmount - voucher.gstAmount
-                var totalGst = voucher.gstAmount
+                var taxableVal = GstCalculationService.taxableValueOf(voucher.totalAmount, voucher.gstAmount)
+                var totalGst = Money.paise(voucher.gstAmount)
 
                 if (taxableVal < 0 || totalGst < 0) {
                     val errorNote = "Negative value in Purchase Voucher #${voucher.voucherNo}: val=$taxableVal, gst=$totalGst. Normalizing."
@@ -358,11 +541,9 @@ object GstAutomationEngine {
                     totalGst = normalizeToZero(totalGst)
                 }
 
-                val split = if (isInterstate) {
-                    TaxSplit(cgst = 0.0, sgst = 0.0, igst = totalGst)
-                } else {
-                    TaxSplit(cgst = totalGst / 2.0, sgst = totalGst / 2.0, igst = 0.0)
-                }
+                val (cgstShare, sgstShare, igstShare) =
+                    GstCalculationService.splitForVoucher(totalGst, isInterstate)
+                val split = TaxSplit(cgst = cgstShare, sgst = sgstShare, igst = igstShare)
 
                 totalPurchaseTaxable += taxableVal
                 totalPurchaseCgst += split.cgst
@@ -370,12 +551,23 @@ object GstAutomationEngine {
                 totalPurchaseIgst += split.igst
             }
 
+            // Table 3.1(a) is outward supply NET of the credit notes issued, and
+            // Table 4(B)(2) reverses the ITC on goods returned to a vendor. Both computed
+            // by the pure aggregator so they can be asserted on the JVM — nothing has ever
+            // tested this engine.
+            val returnTotals = GstReturnAggregator.totalsFor(
+                sales = salesVouchers,
+                creditNotes = creditNoteVouchers,
+                purchases = purchaseVouchers,
+                purchaseReturns = purchaseReturnVouchers
+            )
+
             val supDetails = Gstr3bSupDetails(
                 osupDet = Gstr3bTaxTuple(
-                    txval = totalSalesTaxable,
-                    iamt = totalSalesIgst,
-                    camt = totalSalesCgst,
-                    samt = totalSalesSgst,
+                    txval = returnTotals.outwardTaxable,
+                    iamt = returnTotals.outwardIgst,
+                    camt = returnTotals.outwardCgst,
+                    samt = returnTotals.outwardSgst,
                     csamt = 0.0
                 )
             )
@@ -392,8 +584,28 @@ object GstAutomationEngine {
             )
 
             val itcElg = Gstr3bItcElg(
+                // 4(A) stays GROSS — a purchase return reverses in 4(B), it does not
+                // reduce availment.
                 itcAvl = listOf(itcItem),
-                itcNet = itcItem
+                itcRev = if (returnTotals.hasReversal) listOf(
+                    // itc_rev's enum is RUL (Rules 42/43) | OTH. A purchase return is "Others".
+                    Gstr3bItcItem(
+                        ty = "OTH",
+                        iamt = returnTotals.reversalIgst,
+                        camt = returnTotals.reversalCgst,
+                        samt = returnTotals.reversalSgst,
+                        csamt = 0.0
+                    )
+                ) else emptyList(),
+                // 4(C) = 4(A) - 4(B). Was the SAME OBJECT as itc_avl[0], so net ITC was
+                // structurally incapable of differing from gross. Allowed to go negative:
+                // reversal exceeding availment adds to the period's liability.
+                itcNet = Gstr3bItcNet(
+                    iamt = returnTotals.netItcIgst,
+                    camt = returnTotals.netItcCgst,
+                    samt = returnTotals.netItcSgst,
+                    csamt = 0.0
+                )
             )
 
             val gstr3bPayload = Gstr3bPayload(
@@ -503,45 +715,7 @@ object GstAutomationEngine {
      * blank or unrecognised. This used to end in `else -> "07"`, which quietly filed every
      * unknown state as Delhi; callers now surface the unresolved name instead.
      */
-    private fun getStateCodeFromStateName(stateName: String): String? {
-        return when (stateName.trim().lowercase(Locale.US)) {
-            "jammu & kashmir", "jammu and kashmir" -> "01"
-            "himachal pradesh" -> "02"
-            "punjab" -> "03"
-            "chandigarh" -> "04"
-            "uttarakhand" -> "05"
-            "haryana" -> "06"
-            "delhi", "new delhi" -> "07"
-            "rajasthan" -> "08"
-            "uttar pradesh" -> "09"
-            "bihar" -> "10"
-            "sikkim" -> "11"
-            "arunachal pradesh" -> "12"
-            "nagaland" -> "13"
-            "manipur" -> "14"
-            "mizoram" -> "15"
-            "tripura" -> "16"
-            "meghalaya" -> "17"
-            "assam" -> "18"
-            "west bengal" -> "19"
-            "jharkhand" -> "20"
-            "odisha" -> "21"
-            "chhattisgarh" -> "22"
-            "madhya pradesh" -> "23"
-            "gujarat" -> "24"
-            "daman & diu", "dadra & nagar haveli" -> "26"
-            "maharashtra" -> "27"
-            "andhra pradesh" -> "28"
-            "karnataka" -> "29"
-            "goa" -> "30"
-            "lakshadweep" -> "31"
-            "kerala" -> "32"
-            "tamil nadu" -> "33"
-            "puducherry" -> "34"
-            "andaman & nicobar islands" -> "35"
-            "telangana" -> "36"
-            "ladakh" -> "38"
-            else -> null
-        }
-    }
+    /** Delegates to [GstStateCodes], which the audit checks share so the two agree. */
+    private fun getStateCodeFromStateName(stateName: String): String? =
+        GstStateCodes.codeFor(stateName)
 }

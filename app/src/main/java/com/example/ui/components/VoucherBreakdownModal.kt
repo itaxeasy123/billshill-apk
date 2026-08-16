@@ -7,6 +7,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ReceiptLong
@@ -135,7 +136,7 @@ fun VoucherBreakdownModal(
                             modifier = Modifier.weight(1f)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.ReceiptLong,
+                                imageVector = Icons.AutoMirrored.Filled.ReceiptLong,
                                 contentDescription = null,
                                 tint = RoyalPurplePrimary,
                                 modifier = Modifier.size(24.dp)
@@ -217,7 +218,7 @@ fun VoucherBreakdownModal(
                                             horizontalArrangement = Arrangement.SpaceBetween,
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                                 Surface(
                                                     shape = RoundedCornerShape(6.dp),
                                                     color = RoyalPurplePrimary.copy(alpha = 0.12f),

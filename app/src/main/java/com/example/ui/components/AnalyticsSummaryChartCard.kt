@@ -25,6 +25,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.dao.LedgerWithBalance
@@ -54,7 +55,13 @@ fun AnalyticsSummaryChartCard(
     monthlyPnlRows: List<MonthlyPnlRow>,
     rangeStartMillis: Long,
     rangeEndMillis: Long,
-    trialBalance: List<LedgerWithBalance>,
+    /**
+     * Per-ledger REVENUE/EXPENSE movement for the same range as [monthlyPnlRows].
+     *
+     * Named for what it must be. This took the unbounded trial balance, so the donut
+     * showed lifetime spend beside a date-ranged trend under one date header.
+     */
+    periodExpenseLedgers: List<LedgerWithBalance>,
     modifier: Modifier = Modifier
 ) {
     var selectedChartTab by remember { mutableStateOf(0) } // 0: Monthly P&L Trend, 1: Expense Categories
@@ -103,35 +110,7 @@ fun AnalyticsSummaryChartCard(
 
     // 2. Top expense categories, straight from the trial balance. No floor, no filler:
     //    a ledger with no spend simply doesn't appear.
-    val expenseItems = remember(trialBalance) {
-        val colorPalette = listOf(
-            ElectricPurple,
-            DeepPurpleSecondary,
-            Color(0xFFFF9800),
-            Color(0xFF00BCD4),
-            Color(0xFFE91E63),
-            Color(0xFF4CAF50)
-        )
-
-        val items = trialBalance
-            .filter { it.category == LedgerCategory.EXPENSE && it.currentBalance > 0.0 }
-            .sortedByDescending { it.currentBalance }
-            .take(5)
-            .mapIndexed { idx, l ->
-                ExpenseCategoryItem(
-                    categoryName = l.name,
-                    amount = l.currentBalance,
-                    percentage = 0f,
-                    color = colorPalette[idx % colorPalette.size]
-                )
-            }
-
-        val totalExp = items.sumOf { it.amount }
-        items.map { item ->
-            val pct = if (totalExp > 0) ((item.amount / totalExp) * 100).toFloat() else 0f
-            item.copy(percentage = pct)
-        }
-    }
+    val expenseItems = remember(periodExpenseLedgers) { expenseBreakdown(periodExpenseLedgers) }
 
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -148,7 +127,16 @@ fun AnalyticsSummaryChartCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // The title block carries weight(1f) and the margin badge is measured
+                // first. Without it the title claimed the entire row, the badge was
+                // measured against 0dp of leftover, and "Margin: 0.0%" wrapped to one
+                // character per line — a 12-line-tall sliver at the right edge that
+                // dragged the header (and the blank space around its centred contents)
+                // to roughly three times its proper height.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
                     Box(
                         modifier = Modifier
                             .size(32.dp)
@@ -169,25 +157,32 @@ fun AnalyticsSummaryChartCard(
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = ElectricPurple,
-                            letterSpacing = 0.8.sp
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = "Profit/Loss Trends & Expense Categories (accrual)",
+                            text = "Profit and loss trends, and expenses by ledger",
                             fontSize = 11.sp,
+                            lineHeight = 14.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = LavenderContainer
                 ) {
                     Text(
-                        text = "Margin: ${String.format("%.1f", profitMargin)}%",
+                        text = "Margin ${String.format("%.1f", profitMargin)}%",
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = ElectricPurple,
+                        maxLines = 1,
+                        softWrap = false,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     )
                 }
@@ -217,7 +212,7 @@ fun AnalyticsSummaryChartCard(
                         Icon(
                             imageVector = Icons.Default.ShowChart,
                             contentDescription = null,
-                            tint = if (selectedChartTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (selectedChartTab == 0) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
@@ -225,7 +220,7 @@ fun AnalyticsSummaryChartCard(
                             text = "Monthly P&L Trend",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (selectedChartTab == 0) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (selectedChartTab == 0) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -244,15 +239,15 @@ fun AnalyticsSummaryChartCard(
                         Icon(
                             imageVector = Icons.Default.PieChart,
                             contentDescription = null,
-                            tint = if (selectedChartTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                            tint = if (selectedChartTab == 1) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.size(14.dp)
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = "Top Expenses",
+                            text = "Expenses",
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (selectedChartTab == 1) Color.White else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (selectedChartTab == 1) OnAccent else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
@@ -267,7 +262,10 @@ fun AnalyticsSummaryChartCard(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Box(modifier = Modifier.size(8.dp).background(AccountingGreen, CircleShape))
                             Spacer(modifier = Modifier.width(4.dp))
@@ -347,21 +345,21 @@ fun AnalyticsSummaryChartCard(
                         val drawW = width - (padX * 2)
                         val drawH = height - (padY * 2)
 
-                        val maxVal = max(
-                            monthlyData.maxOfOrNull { max(it.income, it.expense) } ?: 50000.0,
-                            50000.0
-                        ) * 1.15
-                        // A loss-making month is real information — let the axis drop below
-                        // zero instead of clamping the net-profit line flat on the baseline.
-                        val lowest = monthlyData.minOfOrNull {
-                            min(min(it.income, it.expense), it.netProfit)
-                        } ?: 0.0
-                        val minVal = if (lowest < 0) lowest * 1.15 else 0.0
+                        // Headroom on real data, no invented floor. `max(observed, 50000.0)`
+                        // meant the axis never dropped below Rs 57,500 — and with nothing on
+                        // screen naming the scale, a trader with Rs 4,000 of income that month
+                        // got a bar 7% of chart height that read as "nothing happened".
+                        // ChartAxis, not an inline copy: this arithmetic lived inside the
+                        // Canvas lambda where no test in this repo could execute it, which
+                        // is how an invented Rs 50,000 floor survived. See ChartMathTest.
+                        val axis = ChartAxis.forValues(
+                            monthlyData.flatMap { listOf(it.income, it.expense, it.netProfit) }
+                        )
 
-                        fun getY(v: Double): Float {
-                            val norm = ((v - minVal) / (maxVal - minVal)).toFloat()
-                            return height - padY - (norm * drawH)
-                        }
+                        fun getY(v: Double): Float = axis.y(v, height, padY, drawH)
+
+                        // Where zero actually sits. With no negatives this is the baseline.
+                        val zeroY = axis.zeroY(height, padY, drawH)
 
                         fun getX(idx: Int): Float {
                             val step = if (monthlyData.size > 1) drawW / (monthlyData.size - 1) else 0f
@@ -417,7 +415,7 @@ fun AnalyticsSummaryChartCard(
                             val x = getX(idx)
                             val yNet = getY(pt.netProfit)
                             drawCircle(ElectricPurple, radius = 4.dp.toPx(), center = Offset(x, yNet))
-                            drawCircle(Color.White, radius = 2.dp.toPx(), center = Offset(x, yNet))
+                            drawCircle(ChartMarker, radius = 2.dp.toPx(), center = Offset(x, yNet))
                         }
                     }
                 } else {
@@ -435,10 +433,27 @@ fun AnalyticsSummaryChartCard(
                         val drawW = width - (padX * 2)
                         val drawH = height - (padY * 2)
 
-                        val maxVal = max(
-                            monthlyData.maxOfOrNull { max(it.income, it.expense) } ?: 50000.0,
-                            50000.0
-                        ) * 1.15
+                        // Same tested ChartAxis as the line canvas. These were two separate
+                        // inline copies and had already drifted — the bar canvas carried no
+                        // floor for negatives at all, so losses were drawn from the baseline
+                        // downward into 16dp of padding and clipped: a Rs 78,000 loss and a
+                        // Rs 5,00,000 loss rendered identically. ChartMathTest proves no bar
+                        // can leave the canvas at any scale.
+                        val axis = ChartAxis.forValues(
+                            monthlyData.flatMap { listOf(it.income, it.expense, it.netProfit) }
+                        )
+                        val zeroY = axis.zeroY(height, padY, drawH)
+
+                        fun barHeight(value: Double): Float = axis.barHeight(value, drawH)
+                        fun barTop(value: Double, h: Float): Float =
+                            axis.barTop(value, height, padY, drawH)
+
+                        drawLine(
+                            color = SubtleBorder.copy(alpha = 0.35f),
+                            start = Offset(padX, zeroY),
+                            end = Offset(width - padX, zeroY),
+                            strokeWidth = 1.dp.toPx()
+                        )
 
                         val groupW = drawW / monthlyData.size
                         val barW = groupW * 0.28f
@@ -446,24 +461,22 @@ fun AnalyticsSummaryChartCard(
                         monthlyData.forEachIndexed { idx, pt ->
                             val groupLeft = padX + (idx * groupW) + (groupW * 0.1f)
 
-                            val hInc = ((pt.income / maxVal) * drawH).toFloat()
-                            val hExp = ((pt.expense / maxVal) * drawH).toFloat()
-                            // A loss draws downward from the baseline rather than being
-                            // clamped to zero, so a bad month is visible as a loss.
-                            val hNet = ((kotlin.math.abs(pt.netProfit) / maxVal) * drawH).toFloat()
+                            val hInc = barHeight(pt.income)
+                            val hExp = barHeight(pt.expense)
+                            val hNet = barHeight(pt.netProfit)
                             val netIsLoss = pt.netProfit < 0
 
                             // Income Bar
                             drawRect(
                                 color = AccountingGreen,
-                                topLeft = Offset(groupLeft, height - padY - hInc),
+                                topLeft = Offset(groupLeft, barTop(pt.income, hInc)),
                                 size = Size(barW, hInc)
                             )
 
                             // Expense Bar
                             drawRect(
                                 color = AccountingRed,
-                                topLeft = Offset(groupLeft + barW + 2.dp.toPx(), height - padY - hExp),
+                                topLeft = Offset(groupLeft + barW + 2.dp.toPx(), barTop(pt.expense, hExp)),
                                 size = Size(barW, hExp)
                             )
 
@@ -472,7 +485,7 @@ fun AnalyticsSummaryChartCard(
                                 color = if (netIsLoss) AccountingRed else ElectricPurple,
                                 topLeft = Offset(
                                     groupLeft + (barW * 2) + 4.dp.toPx(),
-                                    if (netIsLoss) height - padY else height - padY - hNet
+                                    barTop(pt.netProfit, hNet)
                                 ),
                                 size = Size(barW, hNet)
                             )
@@ -482,17 +495,19 @@ fun AnalyticsSummaryChartCard(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                // X-Axis Month Labels
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
+                // X-Axis Month Labels. One equal slot per month, centred under its data
+                // point: twelve intrinsic-width labels under SpaceBetween needed more
+                // width than the card had, so a full financial year ran off the edge.
+                Row(modifier = Modifier.fillMaxWidth()) {
                     monthlyData.forEach { pt ->
                         Text(
                             text = pt.monthName,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Medium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center,
+                            maxLines = 1,
+                            modifier = Modifier.weight(1f)
                         )
                     }
                 }
@@ -505,20 +520,23 @@ fun AnalyticsSummaryChartCard(
                         .fillMaxWidth()
                         .background(LavenderContainer.copy(alpha = 0.5f), RoundedCornerShape(12.dp))
                         .padding(10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("Total Revenue", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(IndianFormatter.formatRupee(totalIncome), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingGreen)
+                    // Equal thirds. Under SpaceBetween these three columns sized to their
+                    // amounts, so a book with lakh-scale figures pushed the last one past
+                    // the edge of the card.
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Revenue", fontSize = 10.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(IndianFormatter.formatRupee(totalIncome), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = AccountingGreen)
                     }
-                    Column {
-                        Text("Total Expense", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(IndianFormatter.formatRupee(totalExpense), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingRed)
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text("Expense", fontSize = 10.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(IndianFormatter.formatRupee(totalExpense), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = AccountingRed)
                     }
-                    Column {
-                        Text("Net Profit", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text(IndianFormatter.formatRupee(netProfit), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ElectricPurple)
+                    Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.End) {
+                        Text("Net profit", fontSize = 10.sp, maxLines = 1, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(IndianFormatter.formatRupee(netProfit), fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, color = ElectricPurple)
                     }
                 }
             } else if (expenseItems.isEmpty()) {
@@ -580,7 +598,8 @@ fun AnalyticsSummaryChartCard(
                         }
 
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text("Top 5", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ElectricPurple)
+                            // The ring covers all expenses now, not the top five.
+                            Text("All", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ElectricPurple)
                             Text("Expenses", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
@@ -635,4 +654,66 @@ fun AnalyticsSummaryChartCard(
             }
         }
     }
+}
+
+
+/**
+ * The expense donut's slices, as pure data.
+ *
+ * Percentages are of TOTAL expenses. The denominator used to be computed AFTER `.take(5)`,
+ * so the five slices always summed to 100% and the ring always closed 360 degrees: twelve
+ * ledgers totalling 10,00,000 with a top five of 6,00,000 showed Rent at 33.3% when it was
+ * 20% — every slice inflated 1.67x, with nothing on screen admitting a remainder existed.
+ *
+ * The remainder gets its own slice rather than the ring being left open. A gap does not
+ * read as "there is more"; it reads as a rendering glitch, and the reader most likely to be
+ * hurt is the one who does not notice it. "Other (7 ledgers)" answers the question a trader
+ * actually has — how much am I not seeing, and how many things are in it — and it is what
+ * makes true percentages and a closed ring compatible.
+ *
+ * Extracted from the composable so the arithmetic can be tested on the JVM.
+ */
+fun expenseBreakdown(ledgers: List<LedgerWithBalance>): List<ExpenseCategoryItem> {
+        val colorPalette = listOf(
+            ElectricPurple,
+            DeepPurpleSecondary,
+            ChartSlice1,
+            ChartSlice2,
+            ChartSlice3,
+            ChartSlice4
+        )
+
+        val otherColor = ChartSlice5
+
+        val allExpenses = ledgers
+            .filter { it.category == LedgerCategory.EXPENSE && it.currentBalance > 0.0 }
+            .sortedByDescending { it.currentBalance }
+
+        val totalExp = allExpenses.sumOf { it.currentBalance }
+        fun pctOf(amount: Double): Float =
+            if (totalExp > 0.0) ((amount / totalExp) * 100).toFloat() else 0f
+
+        val top = allExpenses.take(5)
+        val rest = allExpenses.drop(5)
+
+        val topItems = top.mapIndexed { idx, l ->
+            ExpenseCategoryItem(
+                categoryName = l.name,
+                amount = l.currentBalance,
+                percentage = pctOf(l.currentBalance),
+                color = colorPalette[idx % colorPalette.size]
+            )
+        }
+
+        return if (rest.isEmpty()) {
+            topItems
+        } else {
+            val restTotal = rest.sumOf { it.currentBalance }
+            topItems + ExpenseCategoryItem(
+                categoryName = "Other (${rest.size} ledgers)",
+                amount = restTotal,
+                percentage = pctOf(restTotal),
+                color = otherColor
+            )
+        }
 }

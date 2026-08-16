@@ -31,6 +31,16 @@ data class BalanceTrendPoint(
     val bankBalance: Double     // running Bank balance at end of this day
 )
 
+/**
+ * How a petty-cash expense is recognised after the fact.
+ *
+ * [AccountingRepository.postPettyExpense] writes it and the Dashboard's petty-cash list
+ * reads it. Kept as one constant because the consumer used to detect these by matching
+ * the party name against "Expense"/"Supplies"/"Transport"/"Hospitality", which missed
+ * three of the app's own seven categories and swept in unrelated payments.
+ */
+const val PETTY_EXPENSE_PREFIX = "Petty Expense:"
+
 /** Stable identities for the ledgers the posting engine must always resolve. */
 const val SYSTEM_LEDGER_CASH = "CASH"
 const val SYSTEM_LEDGER_BANK = "BANK"
@@ -64,11 +74,33 @@ class AccountingRepository(
     val allInventoryItems: Flow<List<InventoryItemEntity>> = dao.getAllInventoryItems()
     val trialBalanceFlow: Flow<List<LedgerWithBalance>> = dao.getTrialBalanceFlow()
     val gstSummaryFlow: Flow<GstSummaryReport> = dao.getGstSummaryFlow()
+
+    /** GST summary for one return period. See [AccountingDao.getGstSummaryForPeriodFlow]. */
+    fun gstSummaryForPeriodFlow(fromMillis: Long, toMillis: Long): Flow<GstSummaryReport> =
+        dao.getGstSummaryForPeriodFlow(fromMillis, toMillis)
     val totalSalesFlow: Flow<Double> = dao.getTotalSalesFlow()
     val totalPurchasesFlow: Flow<Double> = dao.getTotalPurchasesFlow()
     val netCashFlow: Flow<Double> = dao.getNetCashFlow()
     val cashBalanceFlow: Flow<Double> = dao.getCashBalanceFlow()
     val bankBalanceFlow: Flow<Double> = dao.getBankBalanceFlow()
+
+    /** Per-ledger debit/credit totals as on a date — the Trial Balance's real shape. */
+    fun balancesAsOnFlow(asOnMillis: Long): Flow<List<LedgerWithBalance>> =
+        dao.getBalancesAsOnFlow(asOnMillis)
+
+    /**
+     * Per-ledger revenue/expense MOVEMENT within a period.
+     *
+     * Not the same as an as-on balance: the expense donut sits beside a trend chart that
+     * shows movement, so it has to be fed movement. An as-on balance is cumulative, which
+     * is why the donut showed lifetime spend.
+     */
+    fun nominalMovementFlow(fromMillis: Long, toMillis: Long): Flow<List<LedgerWithBalance>> =
+        dao.getNominalMovementFlow(fromMillis, toMillis)
+
+    /** Cash/bank as on a date, so a period chip can reach the balances it sits beside. */
+    fun cashBalanceAsOnFlow(asOnMillis: Long): Flow<Double> = dao.getCashBalanceAsOnFlow(asOnMillis)
+    fun bankBalanceAsOnFlow(asOnMillis: Long): Flow<Double> = dao.getBankBalanceAsOnFlow(asOnMillis)
     val cashAndBankLedgersFlow: Flow<List<LedgerWithBalance>> = dao.getCashAndBankLedgersFlow()
     val salesVouchersFlow: Flow<List<VoucherEntity>> = dao.getSalesVouchersFlow()
     val purchaseVouchersFlow: Flow<List<VoucherEntity>> = dao.getPurchaseVouchersFlow()
@@ -346,9 +378,67 @@ class AccountingRepository(
         dao.updateLedger(updated)
     }
 
-    suspend fun deleteLedger(id: Long) {
-        dao.deleteJournalEntriesByLedgerId(id)
+    /**
+     * The outcome of attempting to delete a ledger.
+     *
+     * [deleteLedger] used to delete the ledger's journal entries and then the ledger,
+     * walking straight past the ON DELETE RESTRICT on journal_entries.ledgerId that
+     * exists to stop exactly that. The other legs of every affected voucher survived, so
+     * a balanced book was left permanently out — one Rs 1,00,000 voucher surviving on
+     * three of its four legs — with no undo, while the toast reported success.
+     *
+     * The schema already encodes the right answer. A voucher's legs travel with the
+     * voucher (CASCADE on voucherId); a ledger's postings belong to *other* vouchers
+     * that must survive intact, so deleting the ledger is refused (RESTRICT on
+     * ledgerId). The escape hatch already exists and is correct: delete the vouchers
+     * first via [deleteVoucher], which removes every leg and unwinds stock, then the
+     * ledger is childless and deletable.
+     */
+    sealed interface LedgerDeleteResult {
+        data object Deleted : LedgerDeleteResult
+        data object NotFound : LedgerDeleteResult
+
+        /** CASH, BANK, STOCK, OPENING_DIFF — the posting engine must always resolve these. */
+        data class SystemLedger(val code: String) : LedgerDeleteResult
+
+        data class HasPostings(val entryCount: Int, val voucherCount: Int) : LedgerDeleteResult
+    }
+
+    /**
+     * Entries and distinct vouchers referencing [id], so a confirmation dialog can tell
+     * the user what is blocking a delete *before* they commit to it.
+     */
+    suspend fun ledgerUsage(id: Long): Pair<Int, Int> =
+        dao.countJournalEntriesForLedger(id) to dao.countVouchersTouchingLedger(id)
+
+    /**
+     * Deletes a ledger only when nothing is posted against it.
+     *
+     * Counting and deleting share one transaction so a voucher posted in between cannot
+     * slip past the check. The RESTRICT foreign key remains the backstop: if this guard
+     * were ever wrong the delete throws instead of silently orphaning postings, which is
+     * the correct failure mode — loud and non-destructive.
+     */
+    suspend fun deleteLedger(id: Long): LedgerDeleteResult = inTransaction {
+        val ledger = dao.getLedgerById(id) ?: return@inTransaction LedgerDeleteResult.NotFound
+
+        // Deleting one of these breaks getCashBalanceFlow, the Cash/Bank trend and the
+        // paymentMode derivation, all of which filter on systemCode. getOrCreateSystemLedger
+        // would then quietly recreate it under its default name on the next voucher, losing
+        // the user's own naming and every historical posting with it.
+        val code = ledger.systemCode
+        if (code != null) return@inTransaction LedgerDeleteResult.SystemLedger(code)
+
+        val entries = dao.countJournalEntriesForLedger(id)
+        if (entries > 0) {
+            return@inTransaction LedgerDeleteResult.HasPostings(
+                entryCount = entries,
+                voucherCount = dao.countVouchersTouchingLedger(id)
+            )
+        }
+
         dao.deleteLedgerById(id)
+        LedgerDeleteResult.Deleted
     }
 
     /**
@@ -780,7 +870,14 @@ class AccountingRepository(
         paymentMode: String = "CASH",
         /** Overrides the posting date. Opening stock must sit before the year it opens. */
         dateMillis: Long? = null
-    ): Long {
+    ): Long = inTransaction {
+        // The header and its gst_tax_details row used to be written as separate loose
+        // calls, unlike amendVoucher which has always been transactional. Cancellation or
+        // process death between them left a voucher carrying tax with no detail row —
+        // permanently, since no migration repairs it — and the Statutory GST tab and the
+        // GSTR-3B CSV both read that row. The postings share the same fate: a voucher
+        // could exist with no journal legs at all, invisible to the Trial Balance while
+        // still counted by SUM(totalAmount).
         // 1. Calculate GST components via GstCalculationService
         val gstBreakdown = GstCalculationService.calculateGstBreakdown(
             totalAmountInclusive = amount,
@@ -881,7 +978,7 @@ class AccountingRepository(
 
         dao.insertSyncLog(SyncLogEntity(action = "CREATE_VOUCHER", payload = syncPayload))
 
-        return voucherId
+        voucherId
     }
 
     private suspend fun getOrCreatePartyLedger(partyName: String, voucherType: VoucherType): LedgerEntity {
@@ -960,6 +1057,35 @@ class AccountingRepository(
         )
         return dao.getLedgerById(id)!!
     }
+
+    /**
+     * Posts a petty-cash expense as Dr <category> / Cr Cash.
+     *
+     * The Dashboard's petty-cash button used to call createVoucher with
+     * `partyName = <the expense category>` on a PAYMENT. getOrCreatePartyLedger files a
+     * PAYMENT counterparty under Sundry Creditors as a LIABILITY, and the PAYMENT branch
+     * then DEBITS it — so Rs 1,000 of tea became a Rs 1,000 debit to a liability called
+     * "Refreshments & Hospitality". getMonthlyPnlFlow selects on the ledger group's
+     * category, so the expense was absent from the P&L, from the expense bars and from
+     * the Reports donut, while the Balance Sheet still tied perfectly. Expenses
+     * disappeared without ever breaking a balance check.
+     *
+     * Credits the real cash ledger resolved by systemCode, so a renamed "Cash in Hand"
+     * still receives the credit.
+     */
+    suspend fun postPettyExpense(
+        category: String,
+        amount: Double,
+        narration: String,
+        dateMillis: Long = System.currentTimeMillis()
+    ): Long = createCustomVoucher(
+        voucherType = VoucherType.PAYMENT,
+        debitLedgerName = category,
+        creditLedgerName = cashLedger().name,
+        amount = amount,
+        narration = narration,
+        dateMillis = dateMillis
+    )
 
     private suspend fun cashLedger(): LedgerEntity =
         getOrCreateSystemLedger(SYSTEM_LEDGER_CASH, "Cash in Hand", "Cash-in-Hand", LedgerCategory.ASSET)

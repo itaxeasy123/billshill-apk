@@ -72,40 +72,100 @@ object IndianFormatter {
         return sdf.format(Date(timestamp))
     }
 
+    /**
+     * A stock quantity as recorded.
+     *
+     * `Double.toInt()` truncates toward zero, so 12.75 kg printed as "12 kg" and -0.5 kg
+     * printed as "0 kg" — inside a badge coloured red for being negative, so the sign
+     * vanished from the number while the colour still claimed it. Quantities are Doubles
+     * throughout and fractional units are ordinary in trade.
+     *
+     * Three decimals, trailing zeros dropped, so whole quantities stay clean.
+     */
+    fun formatQuantity(qty: Double): String {
+        if (qty.isNaN() || qty.isInfinite()) return "-"
+        return java.math.BigDecimal(qty.toString())
+            .setScale(3, java.math.RoundingMode.HALF_UP)
+            .stripTrailingZeros()
+            .toPlainString()
+    }
+
+    /**
+     * Amount in words in the Indian convention a tax invoice requires: whole rupees, then
+     * the paise — 1456.78 becomes "Rupees One Thousand Four Hundred Fifty Six and Seventy
+     * Eight Paise Only".
+     *
+     * `amount.toLong()` discarded the paise outright, so every invoice not ending in .00
+     * printed a words line that disagreed with the figure beside it on the same page.
+     * Quantisation is the same BigDecimal HALF_UP the rest of this object uses, and for
+     * the same reason: truncation also disagreed at the rupee boundary, printing
+     * "Rupees ... Fifty Six Only" under a figure of Rs 1,457.00.
+     *
+     * Negative amounts previously produced the bare string "Rupees Only" — every append
+     * was guarded `> 0` and Long division truncates toward zero, so no branch fired. They
+     * are spelled explicitly now.
+     *
+     * The old helper was named for a range it could not handle: it indexed `tens[n / 10]`
+     * off the end of a 10-element array for any n >= 100, and the crore group was passed
+     * to it unbounded — so any amount from Rs 100 crore upward threw mid-PDF.
+     */
     fun convertNumberToWords(amount: Double): String {
-        val longVal = amount.toLong()
-        if (longVal == 0L) return "Rupees Zero Only"
-        
-        val units = arrayOf("", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
-            "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen")
+        if (!amount.isFinite()) return "Rupees Zero Only"
+
+        val quantised = java.math.BigDecimal(amount.toString())
+            .setScale(2, java.math.RoundingMode.HALF_UP)
+        val isNegative = quantised.signum() < 0
+        val absolute = quantised.abs()
+        val rupees = absolute.toBigInteger().toLong()
+        val paise = absolute.subtract(java.math.BigDecimal(rupees)).movePointRight(2).toLong()
+
+        val units = arrayOf(
+            "", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
+            "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
+            "Eighteen", "Nineteen"
+        )
         val tens = arrayOf("", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety")
 
-        fun convertLessThanThousand(n: Int): String {
-            if (n == 0) return ""
-            if (n < 20) return units[n]
-            val tenStr = tens[n / 10]
-            val unitStr = units[n % 10]
-            return if (unitStr.isEmpty()) tenStr else "$tenStr $unitStr"
+        fun below100(n: Long): String = when {
+            n <= 0L -> ""
+            n < 20L -> units[n.toInt()]
+            else -> listOf(tens[(n / 10).toInt()], units[(n % 10).toInt()])
+                .filter { it.isNotEmpty() }
+                .joinToString(" ")
         }
 
-        var num = longVal
-        val cr = (num / 10000000).toInt()
-        num %= 10000000
-        val lakh = (num / 100000).toInt()
-        num %= 100000
-        val thousand = (num / 1000).toInt()
-        num %= 1000
-        val hundred = (num / 100).toInt()
-        val rest = (num % 100).toInt()
+        // Indian grouping: crore, lakh, thousand, hundred, remainder. Recurses on the
+        // crore group so 1,00,00,00,00,000 reads "One Lakh Crore" instead of crashing.
+        fun spell(value: Long): String {
+            if (value <= 0L) return ""
+            val parts = mutableListOf<String>()
+            val cr = value / 10_000_000L
+            var rest = value % 10_000_000L
+            if (cr > 0) parts += "${spell(cr)} Crore"
+            val lakh = rest / 100_000L
+            rest %= 100_000L
+            if (lakh > 0) parts += "${below100(lakh)} Lakh"
+            val thousand = rest / 1_000L
+            rest %= 1_000L
+            if (thousand > 0) parts += "${below100(thousand)} Thousand"
+            val hundred = rest / 100L
+            rest %= 100L
+            if (hundred > 0) parts += "${units[hundred.toInt()]} Hundred"
+            if (rest > 0) parts += below100(rest)
+            return parts.joinToString(" ")
+        }
 
-        val result = StringBuilder("Rupees ")
-        if (cr > 0) result.append("${convertLessThanThousand(cr)} Crore ")
-        if (lakh > 0) result.append("${convertLessThanThousand(lakh)} Lakh ")
-        if (thousand > 0) result.append("${convertLessThanThousand(thousand)} Thousand ")
-        if (hundred > 0) result.append("${units[hundred]} Hundred ")
-        if (rest > 0) result.append("${convertLessThanThousand(rest)} ")
-        result.append("Only")
+        val rupeeWords = spell(rupees)
+        val paiseWords = below100(paise)
 
-        return result.toString().replace("\\s+".toRegex(), " ").trim()
+        val body = when {
+            rupeeWords.isEmpty() && paiseWords.isEmpty() -> "Zero"
+            rupeeWords.isEmpty() -> "Zero and $paiseWords Paise"
+            paiseWords.isEmpty() -> rupeeWords
+            else -> "$rupeeWords and $paiseWords Paise"
+        }
+
+        val prefix = if (isNegative) "Minus Rupees " else "Rupees "
+        return "$prefix$body Only".replace("\\s+".toRegex(), " ").trim()
     }
 }

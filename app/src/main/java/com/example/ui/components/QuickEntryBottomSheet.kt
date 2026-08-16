@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -61,7 +60,7 @@ fun QuickEntryBottomSheet(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Icon(
                         imageVector = Icons.Default.FlashOn,
                         contentDescription = null,
@@ -99,7 +98,7 @@ fun QuickEntryBottomSheet(
                     label = { Text("⚡ Cash Sale (In)", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AccountingGreen,
-                        selectedLabelColor = Color.White
+                        selectedLabelColor = OnAccent
                     )
                 )
                 FilterChip(
@@ -108,7 +107,7 @@ fun QuickEntryBottomSheet(
                     label = { Text("💸 Cash Expense (Out)", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = AccountingRed,
-                        selectedLabelColor = Color.White
+                        selectedLabelColor = OnAccent
                     )
                 )
                 FilterChip(
@@ -117,7 +116,7 @@ fun QuickEntryBottomSheet(
                     label = { Text("📥 Customer Receipt", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = RoyalPurplePrimary,
-                        selectedLabelColor = Color.White
+                        selectedLabelColor = OnAccent
                     )
                 )
                 FilterChip(
@@ -126,7 +125,7 @@ fun QuickEntryBottomSheet(
                     label = { Text("🏦 Bank / Cash Contra", fontSize = 12.sp, fontWeight = FontWeight.Bold) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = DarkPurpleVariant,
-                        selectedLabelColor = Color.White
+                        selectedLabelColor = OnAccent
                     )
                 )
             }
@@ -230,7 +229,19 @@ fun QuickEntryBottomSheet(
                         onClick = {
                             val current = amountText.toDoubleOrNull() ?: 0.0
                             val added = preset.toDouble()
-                            amountText = (current + added).toInt().toString()
+                            // `.toInt()` truncated the paise off whatever the user had
+                            // already typed — 1250.75 + 500 became 1750, losing 75 paise on
+                            // a tap that claims only to add. The result is written back into
+                            // a field re-parsed with toDoubleOrNull(), which is
+                            // locale-invariant, so what is emitted here must be too.
+                            val total = java.math.BigDecimal(current.toString())
+                                .add(java.math.BigDecimal(added.toString()))
+                                .setScale(2, java.math.RoundingMode.HALF_UP)
+                            amountText = if (total.stripTrailingZeros().scale() <= 0) {
+                                total.toBigInteger().toString()
+                            } else {
+                                total.toPlainString()
+                            }
                         },
                         label = { Text("+₹$preset", fontSize = 11.sp) }
                     )

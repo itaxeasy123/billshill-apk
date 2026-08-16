@@ -47,8 +47,20 @@ object GstCalculationService {
         return Money.paise(enteredAmount * (1.0 + (gstRatePercentage / 100.0)))
     }
 
-    /** GST slabs an Indian invoice can actually carry, including the 40% de-merit rate. */
-    private val SLABS = listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0)
+    /**
+     * The GST slabs an Indian invoice can actually carry, including the 40% de-merit rate.
+     * Public so entry paths can reject anything else BEFORE it reaches the ledger.
+     */
+    val SLABS = listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0)
+
+    /**
+     * Whether a rate corresponds to a real slab.
+     *
+     * [deriveGstRate] deliberately returns off-slab rates unsnapped so they "show up as
+     * the anomaly it is" — this is the predicate that finally makes something show them.
+     */
+    fun isLegalSlab(rate: Double): Boolean =
+        SLABS.any { kotlin.math.abs(it - rate) <= 0.05 }
 
     /**
      * Recovers the rate a posted voucher was charged at, from its own stored figures.
@@ -120,12 +132,7 @@ object GstCalculationService {
             Triple(gstRatePercentage / 2.0, gstRatePercentage / 2.0, 0.0)
         }
 
-        val (cgstAmount, sgstAmount, igstAmount) = if (isInterstate) {
-            Triple(0.0, 0.0, totalGstAmount)
-        } else {
-            val cgst = Money.paise(totalGstAmount / 2.0)
-            Triple(cgst, Money.paise(totalGstAmount - cgst), 0.0)
-        }
+        val (cgstAmount, sgstAmount, igstAmount) = splitHeads(totalGstAmount, isInterstate)
 
         return GstTaxBreakdown(
             grossAmount = grossAmount,
@@ -143,8 +150,50 @@ object GstCalculationService {
     }
 
     /**
-     * Determines whether state codes or state names indicate inter-state supply in India.
+     * The one and only way a GST total is divided into heads.
+     *
+     * Intrastate: CGST is the quantised half and takes the odd paisa; SGST is the
+     * **residual**, so the two always add back to [totalGstAmount] exactly. Rounding each
+     * half independently instead — `total / 2.0` twice — is what let a Rs 1,000.05 base at
+     * 18% print halves of 90.005 each: three decimals into fields the GSTR schema caps at
+     * two, and a printed invoice whose CGST + SGST exceeded its own tax total by a paisa.
+     *
+     * Interstate: the whole tax is IGST and the state heads are zero.
+     *
+     * Every display and export site derives its split from here rather than halving a
+     * total itself. Because a posted voucher's `gstAmount` IS the `totalGstAmount` this
+     * was computed from, [splitForVoucher] reproduces what was stored at posting time —
+     * and repairs vouchers posted before this convention existed, whose stored rows still
+     * hold the old unquantised halves.
      */
+    fun splitHeads(totalGstAmount: Double, isInterstate: Boolean): Triple<Double, Double, Double> =
+        if (isInterstate) {
+            Triple(0.0, 0.0, Money.paise(totalGstAmount))
+        } else {
+            val cgst = Money.paise(totalGstAmount / 2.0)
+            Triple(cgst, Money.paise(totalGstAmount - cgst), 0.0)
+        }
+
+    /**
+     * The CGST / SGST / IGST of an already-posted voucher, in that order.
+     *
+     * Reads nothing from the database on purpose: the split is a pure function of the
+     * voucher's own `gstAmount` and `isInterstate`, both of which sit on the row being
+     * rendered. That keeps every renderer synchronous — no suspend call, no frame where
+     * a tax invoice paints with its tax missing, and no main-thread database read.
+     */
+    fun splitForVoucher(gstAmount: Double, isInterstate: Boolean): Triple<Double, Double, Double> =
+        splitHeads(gstAmount, isInterstate)
+
+    /**
+     * The taxable value of a posted voucher, quantised.
+     *
+     * `totalAmount - gstAmount` as a raw Double put values like 762.7118644067797 into
+     * `txval`, which the portal rejects for the same reason as the split.
+     */
+    fun taxableValueOf(totalAmount: Double, gstAmount: Double): Double =
+        Money.paise(Money.paise(totalAmount) - Money.paise(gstAmount))
+
     fun isInterstateSupply(supplierState: String, recipientState: String): Boolean {
         if (supplierState.isBlank() || recipientState.isBlank()) return false
         return !supplierState.trim().equals(recipientState.trim(), ignoreCase = true)

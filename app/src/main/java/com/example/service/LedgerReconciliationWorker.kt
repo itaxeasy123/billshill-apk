@@ -15,6 +15,7 @@ import com.example.data.model.ReconciliationStatus
 import com.example.data.model.VoucherEntity
 import com.example.data.model.VoucherType
 import com.example.data.preference.UserSettingsDataStore
+import com.example.utils.IndianFormatter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -77,9 +78,20 @@ class LedgerReconciliationWorker(
                 val expected = salesInv.totalAmount
 
                 // Find receipts explicitly referencing this invoice in narration or matching invoice number
+                // Bounded match. `contains` is a substring test, so invoice "INV/2026-27/1"
+                // matched every receipt narrated for INV/2026-27/10, /11, /12 — invoice 1
+                // swallowed ten other invoices' receipts and reported an EXCESS while each of
+                // those ten reported a shortfall. The reference must end at a token boundary.
+                fun mentions(text: String): Boolean {
+                    if (invNo.isBlank()) return false
+                    val idx = text.indexOf(invNo, ignoreCase = true)
+                    if (idx < 0) return false
+                    val after = idx + invNo.length
+                    return after >= text.length || !text[after].isLetterOrDigit()
+                }
                 val matchedReceipts = receiptVouchers.filter { receipt ->
                     receipt.partyName.equals(party, ignoreCase = true) &&
-                            (receipt.narration.contains(invNo, ignoreCase = true) || receipt.tags.contains(invNo, ignoreCase = true))
+                            (mentions(receipt.narration) || mentions(receipt.tags))
                 }
 
                 if (matchedReceipts.isNotEmpty()) {
@@ -126,20 +138,20 @@ class LedgerReconciliationWorker(
 
                 if (!hasSpecificInvoiceFlag && netExpectedSales > 0.0) {
                     val diff = netExpectedSales - partyReceipts
-                    if (diff > 0.01) {
-                        flaggedDiscrepancies.add(
-                            ReconciliationDiscrepancyEntity(
-                                partyName = party,
-                                invoiceVoucherNo = "PARTY-TOTAL",
-                                voucherType = VoucherType.SALES,
-                                expectedAmount = netExpectedSales,
-                                receivedAmount = partyReceipts,
-                                discrepancyAmount = diff,
-                                status = ReconciliationStatus.SHORTFALL,
-                                discrepancyReason = "Party Ledger Shortfall: Total billed Sales (₹${formatAmount(netExpectedSales)}) exceeds total Receipts (₹${formatAmount(partyReceipts)}) by ₹${formatAmount(diff)}."
-                            )
-                        )
-                    } else if (diff < -0.01) {
+                    // The SHORTFALL branch that stood here flagged every credit customer with
+                    // an open balance. Every sale is booked on account, so billed-minus-received
+                    // IS the receivable — the normal state of a credit business, not a
+                    // discrepancy — and it was computed worse than the app's own receivables
+                    // figure: it reads no opening balance, so a migrated party who has since
+                    // paid in full still showed a balance, and it counts only SALES and RECEIPT
+                    // vouchers, so a receivable settled by journal or contra read as unpaid.
+                    // The posted party balance is already shown, correctly, on the
+                    // "Customers (Receivables)" card.
+                    //
+                    // Receipts EXCEEDING billed sales is a real anomaly: money arrived that the
+                    // books cannot place — an unrecorded invoice, a payment credited to the
+                    // wrong party, or a duplicated receipt. Only that case survives here.
+                    if (diff < -0.01) {
                         flaggedDiscrepancies.add(
                             ReconciliationDiscrepancyEntity(
                                 partyName = party,
@@ -178,22 +190,25 @@ class LedgerReconciliationWorker(
 
                 val partyPayments = paymentVouchers.filter { it.partyName.equals(party, ignoreCase = true) }.sumOf { it.totalAmount }
 
-                if (netExpectedPurchases > 0.0 && partyPayments < netExpectedPurchases) {
-                    val diff = netExpectedPurchases - partyPayments
-                    if (diff > 0.01) {
-                        flaggedDiscrepancies.add(
-                            ReconciliationDiscrepancyEntity(
-                                partyName = party,
-                                invoiceVoucherNo = "PURCHASE-TOTAL",
-                                voucherType = VoucherType.PURCHASE,
-                                expectedAmount = netExpectedPurchases,
-                                receivedAmount = partyPayments,
-                                discrepancyAmount = diff,
-                                status = ReconciliationStatus.SHORTFALL,
-                                discrepancyReason = "Vendor Owed Balance: Pending payment of ₹${formatAmount(diff)} against Purchase Bills total ₹${formatAmount(netExpectedPurchases)}."
-                            )
+                // The mirror of the same non-event: an unpaid purchase bill is a payable,
+                // not a discrepancy. "Vendor Owed Balance" flagged every supplier not yet
+                // paid — including bills not yet due — under the same SHORTFALL status as a
+                // genuine mismatch. What the user needs here is an ageing report keyed off a
+                // credit period; neither LedgerEntity nor VoucherEntity records one, so it is
+                // not derivable today and is not being approximated.
+                if (netExpectedPurchases > 0.0 && partyPayments > netExpectedPurchases + 0.01) {
+                    flaggedDiscrepancies.add(
+                        ReconciliationDiscrepancyEntity(
+                            partyName = party,
+                            invoiceVoucherNo = "PURCHASE-TOTAL",
+                            voucherType = VoucherType.PURCHASE,
+                            expectedAmount = netExpectedPurchases,
+                            receivedAmount = partyPayments,
+                            discrepancyAmount = partyPayments - netExpectedPurchases,
+                            status = ReconciliationStatus.EXCESS,
+                            discrepancyReason = "Vendor Overpaid: Payments (₹${formatAmount(partyPayments)}) exceed Purchase Bills (₹${formatAmount(netExpectedPurchases)}) by ₹${formatAmount(partyPayments - netExpectedPurchases)}. Check for a missing bill or a duplicated payment."
                         )
-                    }
+                    )
                 }
             }
 
@@ -215,9 +230,14 @@ class LedgerReconciliationWorker(
             return count
         }
 
-        private fun formatAmount(amount: Double): String {
-            return String.format("%.2f", amount)
-        }
+        /**
+         * Was `String.format("%.2f", amount)` with no Locale, so it took the device
+         * default. On any comma-decimal locale a discrepancy reason rendered "1234,56",
+         * which reads as 1,234 to an Indian user — off by a factor of a hundred. These
+         * strings are stored in the database and read back months later.
+         */
+        private fun formatAmount(amount: Double): String =
+            IndianFormatter.formatRupee(amount, includeSymbol = false)
 
         fun schedulePeriodicReconciliation(context: Context, enabled: Boolean) {
             try {

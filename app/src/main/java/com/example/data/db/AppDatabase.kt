@@ -279,6 +279,42 @@ val MIGRATION_13_14 = object : Migration(13, 14) {
     }
 }
 
+/**
+ * Adds the business's own UPI ID.
+ *
+ * There was nowhere to record one, so the invoice and the share-payment link both
+ * fabricated a payee as "<the user's mobile number>@upi". "@upi" is a live NPCI handle,
+ * so that address is syntactically valid and may well resolve — to whoever registered
+ * that number on BHIM, which the app cannot verify and the business may not be. A
+ * customer following it could pay a stranger. The empty-state copy compounded it by
+ * telling users to "Add a UPI ID in Settings", where no such field existed.
+ */
+val MIGRATION_14_15 = object : Migration(14, 15) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE users ADD COLUMN upiId TEXT NOT NULL DEFAULT ''")
+    }
+}
+
+/**
+ * Adds the business's declared aggregate turnover for the PRECEDING financial year.
+ *
+ * GSTR-1's `gt` is that figure; `cur_gt` is the current FY to date. Both were assigned the
+ * single month's taxable value, which is how the error is visible in the payload — two
+ * fields with different definitions carrying an identical number.
+ *
+ * Declared, not derived. s.2(6) aggregate turnover is PAN-level and all-India, spanning
+ * every GSTIN under the same PAN and including exempt, nil-rated, non-GST and export
+ * supplies; this book holds one GSTIN's taxable outward supplies and cannot tell whether
+ * the two coincide. It may also not span the previous FY at all — a book opened in October
+ * has no April data, and deriving from it would DECLARE a turnover of zero rather than
+ * leave the field unanswered. -1.0 means "not declared" and is distinguishable from 0.0.
+ */
+val MIGRATION_15_16 = object : Migration(15, 16) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE users ADD COLUMN previousFyAggregateTurnover REAL NOT NULL DEFAULT -1.0")
+    }
+}
+
 class AccountingTypeConverters {
     @TypeConverter
     fun fromBusinessType(value: BusinessType): String = value.name
@@ -327,7 +363,7 @@ class AccountingTypeConverters {
         CrashLog::class,
         MonthlyArchive::class
     ],
-    version = 14,
+    version = 16,
     exportSchema = true
 )
 @TypeConverters(AccountingTypeConverters::class)
@@ -348,7 +384,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "indian_mobile_accounting.db"
                 )
-                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
+                    .addMigrations(MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15, MIGRATION_15_16)
                     // Deliberately NOT fallbackToDestructiveMigration(): with it enabled, any
                     // schema bump lacking a matching Migration silently drops every table and
                     // recreates it — destroying the user's books with no warning and no backup.

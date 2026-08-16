@@ -104,9 +104,11 @@ object TallyMargXmlUtil {
                 if (v.isInterstate) {
                     ledgerEntry("$side IGST", v.gstAmount, !partyIsDebit)
                 } else {
-                    val half = v.gstAmount / 2.0
-                    ledgerEntry("$side CGST", half, !partyIsDebit)
-                    ledgerEntry("$side SGST", v.gstAmount - half, !partyIsDebit)
+                    // Was an unquantised half, so Tally received 76.275/76.275 where this
+                    // app's own Output CGST/SGST legs hold 76.28/76.27.
+                    val (cgst, sgst, _) = GstCalculationService.splitForVoucher(v.gstAmount, false)
+                    ledgerEntry("$side CGST", cgst, !partyIsDebit)
+                    ledgerEntry("$side SGST", sgst, !partyIsDebit)
                 }
             }
             sb.append("          </VOUCHER>\n")

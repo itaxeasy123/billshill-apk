@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -87,7 +86,7 @@ fun LedgerReconciliationModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                         Surface(
                             shape = CircleShape,
                             color = RoyalPurplePrimary.copy(alpha = 0.12f),
@@ -147,7 +146,7 @@ fun LedgerReconciliationModal(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                 Surface(
                                     shape = CircleShape,
                                     color = if (unresolvedCount > 0) AccountingRed else AccountingGreen,
@@ -173,7 +172,7 @@ fun LedgerReconciliationModal(
                                 if (isReconciling) {
                                     CircularProgressIndicator(
                                         modifier = Modifier.size(14.dp),
-                                        color = Color.White,
+                                        color = OnAccent,
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(6.dp))
@@ -193,7 +192,7 @@ fun LedgerReconciliationModal(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Total Variance / Discrepancy Owed",
                                     fontSize = 11.sp,
@@ -282,7 +281,7 @@ fun LedgerReconciliationModal(
                             label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = RoyalPurplePrimary,
-                                selectedLabelColor = Color.White
+                                selectedLabelColor = OnAccent
                             ),
                             modifier = Modifier.testTag("filter_chip_$key")
                         )
@@ -397,7 +396,7 @@ fun LedgerReconciliationModal(
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.testTag("confirm_resolve_discrepancy_btn")
                 ) {
-                    Text("Mark Resolved", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("Mark Resolved", color = OnAccent, fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
@@ -448,7 +447,7 @@ fun DiscrepancyItemCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = discrepancy.partyName,
                         fontSize = 14.sp,
@@ -488,7 +487,7 @@ fun DiscrepancyItemCard(
                     .padding(10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text("Expected Invoice", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     Text(
                         IndianFormatter.formatRupee(discrepancy.expectedAmount),

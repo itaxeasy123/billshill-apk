@@ -23,6 +23,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.repository.BalanceTrendPoint
 import com.example.ui.theme.AccountingGreen
+import com.example.ui.theme.ChartMarker
 import com.example.ui.theme.LavenderContainer
 import com.example.ui.theme.RoyalPurplePrimary
 import com.example.utils.IndianFormatter
@@ -62,7 +63,7 @@ fun CashBankTrendChartCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "30-DAY CASH & BANK BALANCE TRENDS",
                         fontSize = 11.sp,
@@ -130,7 +131,7 @@ fun CashBankTrendChartCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                     Box(modifier = Modifier.size(10.dp).background(AccountingGreen, CircleShape))
                     Spacer(modifier = Modifier.width(4.dp))
                     Text("Cash in Hand: ", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -181,16 +182,19 @@ fun CashBankTrendChartCard(
                 val drawWidth = width - (paddingX * 2)
                 val drawHeight = height - (paddingY * 2)
 
-                val maxVal = max(
-                    points.maxOfOrNull { max(it.cashBalance, it.bankBalance) } ?: 10000.0,
-                    10000.0
-                ) * 1.15
+                // Headroom only, no invented floor. `max(observed, 10000.0)` meant the axis
+                // never scaled below Rs 11,500, so a shopkeeper holding Rs 900 of cash saw a
+                // line pinned to the bottom for a balance that is, for them, a normal day.
+                val dataMax = points.maxOfOrNull { max(it.cashBalance, it.bankBalance) } ?: 0.0
+                val dataMin = points.minOfOrNull { min(it.cashBalance, it.bankBalance) } ?: 0.0
+                val maxVal = if (dataMax > 0.0) dataMax * 1.15 else 0.0
                 // Real books can go negative (overdraft, payments ahead of receipts).
-                val lowest = points.minOfOrNull { min(it.cashBalance, it.bankBalance) } ?: 0.0
-                val minVal = if (lowest < 0) lowest * 1.15 else 0.0
+                val minVal = if (dataMin < 0.0) dataMin * 1.15 else 0.0
+                // Defined-division fallback for a book sitting at exactly zero.
+                val span = (maxVal - minVal).takeIf { it > 0.0 } ?: 1.0
 
                 fun getY(value: Double): Float {
-                    val normalized = ((value - minVal) / (maxVal - minVal)).toFloat()
+                    val normalized = ((value - minVal) / span).toFloat()
                     return height - paddingY - (normalized * drawHeight)
                 }
 
@@ -247,10 +251,10 @@ fun CashBankTrendChartCard(
                     val yBank = getY(point.bankBalance)
 
                     drawCircle(color = bankColor, radius = 4.dp.toPx(), center = Offset(x, yBank))
-                    drawCircle(color = Color.White, radius = 2.dp.toPx(), center = Offset(x, yBank))
+                    drawCircle(color = ChartMarker, radius = 2.dp.toPx(), center = Offset(x, yBank))
 
                     drawCircle(color = cashColor, radius = 4.dp.toPx(), center = Offset(x, yCash))
-                    drawCircle(color = Color.White, radius = 2.dp.toPx(), center = Offset(x, yCash))
+                    drawCircle(color = ChartMarker, radius = 2.dp.toPx(), center = Offset(x, yCash))
                 }
             }
 

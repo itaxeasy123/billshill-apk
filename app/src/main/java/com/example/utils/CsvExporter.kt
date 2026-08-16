@@ -47,11 +47,15 @@ object CsvExporter {
     /**
      * @param buyerGstins party name (lowercased) to that party's GSTIN, so the classifier
      *   can tell a registered recipient from a consumer.
+     * @param creditNotes SALES_RETURN vouchers for the same period — GSTR-1 Table 9B.
+     *   Omitted entirely before, so this CSV reported gross outward supply while the
+     *   GSTR-3B CSV beside it (which reads the netted getGstSummaryFlow) reported net.
      */
     fun generateGstr1Csv(
         salesVouchers: List<VoucherEntity>,
         user: com.example.data.model.UserEntity,
-        buyerGstins: Map<String, String> = emptyMap()
+        buyerGstins: Map<String, String> = emptyMap(),
+        creditNotes: List<VoucherEntity> = emptyList()
     ): String {
         val sb = StringBuilder()
         sb.append("GSTR-1 STATUTORY RETURN SUMMARY REPORT\n")
@@ -68,11 +72,26 @@ object CsvExporter {
             val taxable = v.totalAmount - v.gstAmount
             sb.append("${csv(v.voucherNo)},${csv(IndianFormatter.formatDate(v.date))},${csv(v.partyName)},$supplyType,$taxable,${v.gstAmount},${v.totalAmount},${v.isInterstate}\n")
         }
-        val totalVal = salesVouchers.sumOf { it.totalAmount }
-        val totalGst = salesVouchers.sumOf { it.gstAmount }
+        // Credit notes carry POSITIVE amounts in the database and in the GSTR-1 JSON,
+        // where ntty="C" supplies the direction. A flat CSV has no such tag, so the sign
+        // written here is what makes the TOTAL row below reconcile.
+        creditNotes.forEach { v ->
+            val table = when (
+                com.example.data.gst.GstClassifier
+                    .classify(buyerGstins[v.partyName.lowercase()], v.isInterstate, v.totalAmount)
+            ) {
+                com.example.data.gst.SupplyCategory.B2B -> "Credit Note 9B (CDNR)"
+                com.example.data.gst.SupplyCategory.B2CL -> "Credit Note 9B (CDNUR)"
+                com.example.data.gst.SupplyCategory.B2CS -> "Credit Note (netted into B2CS)"
+            }
+            val taxable = v.totalAmount - v.gstAmount
+            sb.append("${csv(v.voucherNo)},${csv(IndianFormatter.formatDate(v.date))},${csv(v.partyName)},$table,${-taxable},${-v.gstAmount},${-v.totalAmount},${v.isInterstate}\n")
+        }
+        val totalVal = salesVouchers.sumOf { it.totalAmount } - creditNotes.sumOf { it.totalAmount }
+        val totalGst = salesVouchers.sumOf { it.gstAmount } - creditNotes.sumOf { it.gstAmount }
         // `.size`, not the list itself — interpolating List<VoucherEntity> dumped the whole
         // object graph (commas included) into the summary row of a statutory return export.
-        sb.append("TOTAL,,,${salesVouchers.size} Invoices,${totalVal - totalGst},$totalGst,$totalVal,\n")
+        sb.append("TOTAL,,,${salesVouchers.size} Invoices less ${creditNotes.size} Credit Notes,${totalVal - totalGst},$totalGst,$totalVal,\n")
         return sb.toString()
     }
 
@@ -110,7 +129,10 @@ object CsvExporter {
         try {
             val cacheDir = File(context.cacheDir, "reports_export")
             if (!cacheDir.exists()) cacheDir.mkdirs()
-            val file = File(cacheDir, filename)
+            // Callers build these names from user data — business name, ledger name — and
+            // "M/s Foo" named a directory that does not exist, so the write failed. The
+            // extension is preserved because mimeTypeFor() keys off it.
+            val file = File(cacheDir, FileNames.safeWithExtension(filename, "report"))
             file.writeText(content)
 
             val uri: Uri = FileProvider.getUriForFile(
@@ -162,7 +184,11 @@ object CsvExporter {
             if (!cacheDir.exists()) {
                 cacheDir.mkdirs()
             }
-            val file = File(cacheDir, filename)
+            // Same reason as shareTextOrPdfReport: these names are built from business and
+            // ledger names, which routinely contain '/'. Sanitised after the extension is
+            // read below, and safeWithExtension keeps the suffix so both the BOM decision
+            // and mimeTypeFor() still see it.
+            val file = File(cacheDir, FileNames.safeWithExtension(filename, "export"))
             // UTF-8 BOM, CSV only: Excel on Windows otherwise decodes a BOM-less file
             // with the system code page, turning Devanagari party and business names
             // into mojibake. It must NOT be added to the JSON and XML files that also

@@ -2,6 +2,7 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -18,10 +19,10 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -31,6 +32,7 @@ import com.example.data.model.LedgerCategory
 import com.example.data.model.LedgerEntity
 import com.example.ui.AccountingViewModel
 import com.example.ui.theme.*
+import com.example.utils.IndianFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -106,47 +108,51 @@ fun LedgerManagementModal(
                     .fillMaxSize()
                     .padding(20.dp)
             ) {
-                // Header with Back Button
+                // Header. One dismiss control: the back arrow and the trailing X both
+                // called onDismiss, and the unweighted title between them was taking the
+                // whole row.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        IconButton(
-                            onClick = onDismiss,
-                            modifier = Modifier.testTag("ledger_mgmt_back_btn")
-                        ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back",
-                                tint = RoyalPurplePrimary
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Column {
-                            Text(
-                                text = "Chart of Accounts & Ledgers",
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = RoyalPurplePrimary
-                            )
-                            Text(
-                                text = "Create, edit & manage accounting ledgers",
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.testTag("ledger_mgmt_back_btn")
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Close",
+                            tint = RoyalPurplePrimary
+                        )
                     }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Chart of accounts",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = RoyalPurplePrimary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "Create, edit and manage your ledgers",
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // Search & Add New Row
+                // Search & Add New Row.
+                //
+                // "+ New Ledger" took 125dp of a 296dp row, leaving the search field about
+                // 100dp of usable text width — so its own placeholder wrapped to three
+                // lines and the field rendered three times its proper height. The button
+                // is now an icon with a one-word label, and the placeholder is capped at
+                // one line so it can never do that again at any width.
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -155,12 +161,19 @@ fun LedgerManagementModal(
                     OutlinedTextField(
                         value = searchQuery,
                         onValueChange = { searchQuery = it },
-                        placeholder = { Text("Search account or group...", fontSize = 12.sp) },
+                        placeholder = {
+                            Text(
+                                "Search ledgers",
+                                fontSize = 13.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        },
                         leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                         trailingIcon = {
                             if (searchQuery.isNotEmpty()) {
                                 IconButton(onClick = { searchQuery = "" }) {
-                                    Icon(Icons.Default.Clear, contentDescription = "Clear", modifier = Modifier.size(16.dp))
+                                    Icon(Icons.Default.Clear, contentDescription = "Clear search", modifier = Modifier.size(16.dp))
                                 }
                             }
                         },
@@ -180,7 +193,7 @@ fun LedgerManagementModal(
                     ) {
                         Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("New Ledger", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                        Text("New", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
 
@@ -236,11 +249,18 @@ fun LedgerManagementModal(
                                 ) {
                                     Column(modifier = Modifier.weight(1f)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
+                                            // The name yields; the badge does not. Both
+                                            // were unweighted, so a long ledger name took
+                                            // the row and left the badge measuring against
+                                            // nothing — "EXPENSE" came out as "EXPEN / SE".
                                             Text(
                                                 text = ledger.name,
                                                 fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = RoyalPurplePrimary
+                                                color = RoyalPurplePrimary,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                                modifier = Modifier.weight(1f, fill = false)
                                             )
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Surface(
@@ -252,15 +272,40 @@ fun LedgerManagementModal(
                                                     fontSize = 9.sp,
                                                     fontWeight = FontWeight.Bold,
                                                     color = RoyalPurplePrimary,
+                                                    maxLines = 1,
+                                                    softWrap = false,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
                                                 )
                                             }
                                         }
 
                                         Spacer(modifier = Modifier.height(2.dp))
+                                        // Labelled "Opening", not "Bal". This row only has a
+                                        // LedgerEntity, whose openingBalance is the balance the
+                                        // book *started* with — it says nothing about what has
+                                        // been posted since. Calling it "Bal" showed a customer
+                                        // carrying Rs 4,00,000 of live invoices as "Bal: 0.0 DR",
+                                        // telling the user the account was empty immediately
+                                        // before offering to delete it.
+                                        //
+                                        // Group and opening balance are two lines, not one
+                                        // wrapped run-on. Sharing the row with the edit and
+                                        // delete buttons leaves about 200dp, so the single
+                                        // line broke wherever it happened to run out —
+                                        // usually between the amount and its DR/CR suffix,
+                                        // which is the one place it must not break.
                                         Text(
-                                            text = "Group: ${ledger.groupName} • Bal: ₹${ledger.openingBalance} ${ledger.balanceType}",
+                                            text = ledger.groupName,
                                             fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            text = "Opening ${IndianFormatter.formatRupee(ledger.openingBalance)} ${ledger.balanceType}",
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
 
@@ -286,14 +331,21 @@ fun LedgerManagementModal(
                                             )
                                         }
 
+                                        // System accounts (CASH, BANK, STOCK, OPENING_DIFF) are
+                                        // what the posting engine resolves against; the icon is
+                                        // disabled rather than left armed and refused later.
+                                        val deletable = ledger.systemCode == null
                                         IconButton(
                                             onClick = { deleteConfirmLedger = ledger },
+                                            enabled = deletable,
                                             modifier = Modifier.testTag("delete_ledger_${ledger.id}")
                                         ) {
                                             Icon(
                                                 Icons.Default.Delete,
-                                                contentDescription = "Delete Ledger",
-                                                tint = AccountingRed,
+                                                contentDescription = if (deletable) "Delete Ledger"
+                                                    else "System account — cannot be deleted",
+                                                tint = if (deletable) AccountingRed
+                                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.38f),
                                                 modifier = Modifier.size(20.dp)
                                             )
                                         }
@@ -329,7 +381,8 @@ fun LedgerManagementModal(
                     OutlinedTextField(
                         value = ledgerName,
                         onValueChange = { ledgerName = it },
-                        label = { Text("Ledger Name * (e.g. Car Account, Rent Expense, Ramesh Loan)") },
+                        label = { Text("Ledger name *") },
+                        placeholder = { Text("e.g. Car Account, Rent Expense, Ramesh Loan") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -354,74 +407,90 @@ fun LedgerManagementModal(
                         "Investments" to LedgerCategory.ASSET
                     )
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = groupName,
-                            onValueChange = { groupName = it },
-                            label = { Text("Group Name") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-                    }
-
-                    // Category Chips
-                    Text("Category Type:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        LedgerCategory.values().forEach { cat ->
-                            FilterChip(
-                                selected = category == cat,
-                                onClick = { category = cat },
-                                label = { Text(cat.name, fontSize = 10.sp) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = RoyalPurplePrimary,
-                                    selectedLabelColor = Color.White
-                                )
-                            )
-                        }
-                    }
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = openingBalanceText,
-                            onValueChange = { openingBalanceText = it },
-                            label = { Text("Opening Balance (₹)") },
-                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
-                            singleLine = true,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.weight(1f)
-                        )
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            FilterChip(
-                                selected = balanceType == BalanceType.DR,
-                                onClick = { balanceType = BalanceType.DR },
-                                label = { Text("Dr", fontSize = 12.sp) }
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            FilterChip(
-                                selected = balanceType == BalanceType.CR,
-                                onClick = { balanceType = BalanceType.CR },
-                                label = { Text("Cr", fontSize = 12.sp) }
+                    // These chips were declared and never rendered, leaving the group as a
+                    // bare free-text field. That matters beyond tidiness: which accounts
+                    // the Cash and Bank tiles count is decided by the ledger's GROUP name,
+                    // so a user who types "HDFC" instead of picking "Bank Accounts" has
+                    // their money silently excluded from the dashboard. Offering the
+                    // canonical spellings makes that the rare case rather than the default.
+                    // The text field stays as an escape hatch for anything not listed.
+                    Text(
+                        "Tap a standard group, or type your own below",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp, verticalSpacing = 6.dp) {
+                        commonGroups.forEach { (group, cat) ->
+                            ChoiceChip(
+                                label = group,
+                                selected = groupName.equals(group, ignoreCase = true),
+                                onClick = {
+                                    groupName = group
+                                    // The category is implied by the group; picking
+                                    // "Bank Accounts" and leaving category on EXPENSE
+                                    // would misplace the ledger on both statements.
+                                    category = cat
+                                },
+                                fontSize = 10.sp
                             )
                         }
                     }
 
                     OutlinedTextField(
+                        value = groupName,
+                        onValueChange = { groupName = it },
+                        label = { Text("Group name") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    // Category Chips. Five of them at intrinsic width overflow a dialog
+                    // row, so they wrap rather than run off the edge.
+                    Text("Category", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp, verticalSpacing = 6.dp) {
+                        LedgerCategory.values().forEach { cat ->
+                            ChoiceChip(
+                                label = cat.name,
+                                selected = category == cat,
+                                onClick = { category = cat },
+                                fontSize = 10.sp
+                            )
+                        }
+                    }
+
+                    // Opening balance and its Dr/Cr sign stack instead of sharing a row:
+                    // side by side, the field kept its label wrapping under a pair of
+                    // chips that had already taken their intrinsic width.
+                    OutlinedTextField(
+                        value = openingBalanceText,
+                        onValueChange = { openingBalanceText = it },
+                        label = { Text("Opening balance (₹)") },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp) {
+                        ChoiceChip(
+                            label = "Debit (Dr)",
+                            selected = balanceType == BalanceType.DR,
+                            onClick = { balanceType = BalanceType.DR },
+                            fontSize = 12.sp
+                        )
+                        ChoiceChip(
+                            label = "Credit (Cr)",
+                            selected = balanceType == BalanceType.CR,
+                            onClick = { balanceType = BalanceType.CR },
+                            fontSize = 12.sp
+                        )
+                    }
+
+                    OutlinedTextField(
                         value = gstin,
                         onValueChange = { gstin = it.uppercase() },
-                        label = { Text("Party GSTIN (Optional)") },
+                        label = { Text("Party GSTIN (optional)") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth()
@@ -495,29 +564,78 @@ fun LedgerManagementModal(
     }
 
     // Delete Confirmation Dialog
+    //
+    // This used to read "Associated journal entries for this ledger will also be
+    // removed" — an accurate description of the mechanism and a silent one about the
+    // consequence, which was that the *other* legs of those same vouchers stayed behind
+    // and the book came out unbalanced. Deleting a ledger with postings is now refused,
+    // so the dialog reports what is blocking it instead of arming a button that fails.
     if (deleteConfirmLedger != null) {
         val target = deleteConfirmLedger!!
+        val systemCode = target.systemCode
+
+        // null while the count is in flight — the confirm button stays disabled until it
+        // resolves, so the dialog never offers a delete it cannot honour.
+        var usage by remember(target.id) { mutableStateOf<Pair<Int, Int>?>(null) }
+        LaunchedEffect(target.id) { usage = viewModel.ledgerUsage(target.id) }
+
+        val entryCount = usage?.first ?: 0
+        val voucherCount = usage?.second ?: 0
+        val blocked = systemCode != null || entryCount > 0
+
         AlertDialog(
             onDismissRequest = { deleteConfirmLedger = null },
-            title = { Text("Delete Ledger '${target.name}'?", fontWeight = FontWeight.Bold, color = AccountingRed) },
+            title = {
+                Text(
+                    if (blocked) "Cannot delete '${target.name}'" else "Delete ledger '${target.name}'?",
+                    fontWeight = FontWeight.Bold,
+                    color = if (blocked) MaterialTheme.colorScheme.onSurface else AccountingRed
+                )
+            },
             text = {
-                Text("Are you sure you want to delete this ledger? Associated journal entries for this ledger will also be removed.")
+                Text(
+                    when {
+                        systemCode != null ->
+                            "'${target.name}' is a system account ($systemCode) used by every " +
+                                "receipt, payment and contra. It cannot be deleted."
+
+                        usage == null -> "Checking whether anything is posted to this ledger…"
+
+                        entryCount > 0 ->
+                            "'${target.name}' is used by $entryCount journal " +
+                                (if (entryCount == 1) "entry" else "entries") +
+                                " across $voucherCount " +
+                                (if (voucherCount == 1) "voucher" else "vouchers") +
+                                ". Delete or amend those vouchers first — deleting a voucher " +
+                                "removes all of its entries together and keeps the books balanced."
+
+                        target.openingBalance != 0.0 ->
+                            "'${target.name}' has no transactions, but it carries an opening " +
+                                "balance of ${IndianFormatter.formatRupee(target.openingBalance)} " +
+                                "${target.balanceType}, which will be removed from the books."
+
+                        else -> "'${target.name}' has no transactions and can be safely deleted."
+                    }
+                )
             },
             confirmButton = {
-                Button(
-                    onClick = {
-                        viewModel.deleteLedger(target.id, target.name)
-                        deleteConfirmLedger = null
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = AccountingRed),
-                    shape = RoundedCornerShape(12.dp)
-                ) {
-                    Text("Delete", fontWeight = FontWeight.Bold)
+                if (!blocked) {
+                    Button(
+                        onClick = {
+                            viewModel.deleteLedger(target.id, target.name)
+                            deleteConfirmLedger = null
+                        },
+                        enabled = usage != null,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccountingRed),
+                        shape = RoundedCornerShape(12.dp)
+                    ) {
+                        Text("Delete", fontWeight = FontWeight.Bold)
+                    }
                 }
             },
             dismissButton = {
                 TextButton(onClick = { deleteConfirmLedger = null }) {
-                    Text("Cancel")
+                    Text(if (blocked) "Close" else "Cancel")
                 }
             }
         )

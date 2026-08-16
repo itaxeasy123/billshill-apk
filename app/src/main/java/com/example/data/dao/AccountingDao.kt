@@ -4,6 +4,93 @@ import androidx.room.*
 import com.example.data.model.*
 import kotlinx.coroutines.flow.Flow
 
+// ---------------------------------------------------------------------------------
+// What counts as cash, and what counts as a bank account.
+//
+// These used to be written out per query as `l.name LIKE '%Cash%' OR lg.name LIKE
+// '%Cash%'`, eleven times, in three mutually incompatible variants. Two consequences:
+//
+//   * A credit sale to a customer called "HDFC Bank Ltd" creates a Sundry Debtors
+//     ledger of that name, and matching on the LEDGER's name counted their receivable
+//     as money in the bank. Membership is a property of the ledger's GROUP, never of
+//     its name — "Cashmere Textiles" and "Prakash Traders" are the same trap.
+//   * "Cash at Bank", and the "Cash/Bank Accounts" group the app invents itself,
+//     matched BOTH predicates, so the dashboard's cash + bank total counted them twice.
+//
+// systemCode alone is not the answer either: it is an identity for the one account the
+// posting engine defaults to, not a classification of which accounts hold money. It is
+// stamped on exactly one seeded cash ledger and one seeded bank ledger, so keying off
+// it alone would hide the second and third bank account of any real business.
+//
+// Hence: systemCode as an override, group name as the general rule. The
+// `systemCode IS NULL` guard on the group branch is what makes the two sets provably
+// DISJOINT — no ledger can satisfy both, so cash + bank is a legitimate sum and cannot
+// double-count. A STOCK or OPENING_DIFF ledger fails both branches and never leaks in.
+//
+// Group spellings are normalised for case, spaces, hyphens, slashes and dots, the same
+// way getLedgerByLooseName and MIGRATION_9_10 already do it. Keep the two whitelists in
+// step with TallyGroupMapper.byName (TallyGroup.kt), the other place that enumerates
+// these spellings.
+// ---------------------------------------------------------------------------------
+
+/** Normalised group name, falling back to the denormalised copy for orphaned ledgers. */
+private const val NORM_GROUP =
+    "REPLACE(REPLACE(REPLACE(REPLACE(LOWER(COALESCE(lg.name, l.groupName)), ' ', ''), '-', ''), '/', ''), '.', '')"
+
+private const val CASH_GROUPS =
+    "('cashinhand', 'cash', 'cashaccount', 'cashaccounts', 'pettycash')"
+
+/**
+ * Bank OD / OCC / Overdraft are IN: they are real bank accounts that happen to run
+ * credit, and the signed opening balance below renders them negative, which is what an
+ * overdraft is. "Cash/Bank Accounts" is assigned here and here only, so the cash bucket
+ * stays strictly physical cash-in-hand — the definition the trend chart documents.
+ */
+private const val BANK_GROUPS =
+    "('bankaccounts', 'bankaccount', 'bankod', 'bankodac', 'bankocc', " +
+        "'bankoccac', 'bankoverdraft', 'cashbankaccounts')"
+
+const val IS_CASH =
+    "(l.systemCode = 'CASH' OR (l.systemCode IS NULL AND $NORM_GROUP IN $CASH_GROUPS))"
+
+const val IS_BANK =
+    "(l.systemCode = 'BANK' OR (l.systemCode IS NULL AND $NORM_GROUP IN $BANK_GROUPS))"
+
+const val IS_CASH_OR_BANK =
+    "(l.systemCode IN ('CASH', 'BANK') OR (l.systemCode IS NULL AND " +
+        "($NORM_GROUP IN $CASH_GROUPS OR $NORM_GROUP IN $BANK_GROUPS)))"
+
+/**
+ * Opening balances summed with their sign. Plain `SUM(l.openingBalance)` ignored
+ * balanceType, so a Bank OD A/c opened at 2,00,000 CR reported +2,00,000 — an overdraft
+ * displayed as money in hand, wrong by 4,00,000 and in the flattering direction.
+ */
+private const val SIGNED_OPENING =
+    "CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE -l.openingBalance END"
+
+/**
+ * The same membership rule for Kotlin-side callers that only hold a [LedgerWithBalance]
+ * and cannot see `systemCode`.
+ *
+ * Kept immediately beside the SQL above so the two cannot drift apart — if you add a
+ * spelling to one whitelist, add it to the other. The normalisation is equivalent for
+ * these names: the SQL strips spaces, hyphens, slashes and dots, and this strips every
+ * non-alphanumeric.
+ */
+object FundsGroups {
+    private val CASH = setOf("cashinhand", "cash", "cashaccount", "cashaccounts", "pettycash")
+    private val BANK = setOf(
+        "bankaccounts", "bankaccount", "bankod", "bankodac",
+        "bankocc", "bankoccac", "bankoverdraft", "cashbankaccounts"
+    )
+
+    private fun norm(name: String) = name.lowercase().filter { it.isLetterOrDigit() }
+
+    /** Group name only. Matching the LEDGER name is what counted "HDFC Bank Ltd" as a bank. */
+    fun isCash(groupName: String) = norm(groupName) in CASH
+    fun isBank(groupName: String) = norm(groupName) in BANK
+}
+
 data class LedgerWithBalance(
     val id: Long,
     val name: String,
@@ -93,8 +180,25 @@ interface AccountingDao {
     @Query("DELETE FROM ledgers WHERE id = :id")
     suspend fun deleteLedgerById(id: Long)
 
-    @Query("DELETE FROM journal_entries WHERE ledgerId = :id")
-    suspend fun deleteJournalEntriesByLedgerId(id: Long)
+    // There is deliberately no "delete the journal entries for this ledger" query.
+    // One used to exist, and deleteLedger called it to clear the child rows so that the
+    // ON DELETE RESTRICT on journal_entries.ledgerId had nothing left to refuse. That
+    // destroyed one side of every posting the ledger took part in while the other legs
+    // stayed behind: a balanced book went Rs 1,00,000 out, one voucher surviving on three
+    // of its four legs, with no undo and a toast reporting success. A ledger carrying
+    // postings is not deletable — the vouchers go first, and deleting a voucher takes all
+    // of its legs with it through the CASCADE on journal_entries.voucherId.
+
+    /** How many postings reference this ledger. Zero is the only deletable state. */
+    @Query("SELECT COUNT(*) FROM journal_entries WHERE ledgerId = :id")
+    suspend fun countJournalEntriesForLedger(id: Long): Int
+
+    /**
+     * How many distinct vouchers those postings belong to — the number the user has to
+     * act on, which is what the refusal message quotes.
+     */
+    @Query("SELECT COUNT(DISTINCT voucherId) FROM journal_entries WHERE ledgerId = :id")
+    suspend fun countVouchersTouchingLedger(id: Long): Int
 
     @Query("SELECT * FROM ledgers ORDER BY name ASC")
     fun getAllLedgers(): Flow<List<LedgerEntity>>
@@ -410,6 +514,28 @@ interface AccountingDao {
     """)
     fun getGstSummaryFlow(): Flow<GstSummaryReport>
 
+    /**
+     * The same summary, bounded to one return period.
+     *
+     * A GST return covers exactly one month or one quarter. The unbounded query above was
+     * the only one available, so the Statutory GST tab and the GSTR-3B CSV both reported
+     * every voucher ever posted under a heading naming the selected period — and disagreed
+     * with the JSON export, which does bound to the current month.
+     */
+    @Query("""
+        SELECT 
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.cgstAmount WHEN 'SALES_RETURN' THEN -g.cgstAmount ELSE 0 END), 0) as totalOutputCgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.sgstAmount WHEN 'SALES_RETURN' THEN -g.sgstAmount ELSE 0 END), 0) as totalOutputSgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'SALES' THEN g.igstAmount WHEN 'SALES_RETURN' THEN -g.igstAmount ELSE 0 END), 0) as totalOutputIgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.cgstAmount WHEN 'PURCHASE_RETURN' THEN -g.cgstAmount ELSE 0 END), 0) as totalInputCgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.sgstAmount WHEN 'PURCHASE_RETURN' THEN -g.sgstAmount ELSE 0 END), 0) as totalInputSgst,
+            COALESCE(SUM(CASE v.voucherType WHEN 'PURCHASE' THEN g.igstAmount WHEN 'PURCHASE_RETURN' THEN -g.igstAmount ELSE 0 END), 0) as totalInputIgst
+        FROM gst_tax_details g
+        JOIN vouchers v ON g.voucherId = v.id
+        WHERE v.date BETWEEN :fromMillis AND :toMillis
+    """)
+    fun getGstSummaryForPeriodFlow(fromMillis: Long, toMillis: Long): Flow<GstSummaryReport>
+
     @Query("DELETE FROM journal_entries WHERE voucherId = :voucherId")
     suspend fun deleteJournalEntriesForVoucher(voucherId: Long)
 
@@ -426,11 +552,38 @@ interface AccountingDao {
     @Query("SELECT COALESCE(SUM(totalAmount), 0) FROM vouchers WHERE voucherType = 'PURCHASE'")
     fun getTotalPurchasesFlow(): Flow<Double>
 
-    @Query("SELECT COALESCE(SUM(debitAmount - creditAmount), 0) FROM journal_entries je JOIN ledgers l ON je.ledgerId = l.id WHERE l.name LIKE '%Cash%' OR l.name LIKE '%Bank%'")
+    @Query("""
+        SELECT COALESCE(SUM(je.debitAmount - je.creditAmount), 0)
+        FROM journal_entries je
+        JOIN ledgers l ON je.ledgerId = l.id
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE $IS_CASH_OR_BANK
+    """)
     fun getNetCashFlow(): Flow<Double>
 
-    @Query("SELECT COALESCE(SUM(debitAmount - creditAmount), 0) FROM journal_entries je JOIN ledgers l ON je.ledgerId = l.id WHERE l.name LIKE '%Cash%' OR l.name LIKE '%Bank%'")
+    /**
+     * The home-screen widget's own refresh path. It omitted opening balances entirely,
+     * so the widget and the dashboard disagreed for any book that opened with money
+     * already in hand. Same membership and the same signed opening as the tiles.
+     */
+    @Query("""
+        SELECT
+            COALESCE((
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH_OR_BANK
+            ), 0)
+            +
+            COALESCE((
+                SELECT SUM(je.debitAmount - je.creditAmount)
+                FROM journal_entries je
+                JOIN ledgers l ON je.ledgerId = l.id
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH_OR_BANK
+            ), 0)
+    """)
     suspend fun getCashAndBankBalanceSync(): Double
+
 
     // NOTE: opening balances and journal movement are summed in SEPARATE scalar
     // subqueries on purpose. The previous single-statement LEFT JOIN form repeated
@@ -439,17 +592,17 @@ interface AccountingDao {
     @Query("""
         SELECT
             COALESCE((
-                SELECT SUM(l.openingBalance)
-                FROM ledgers l JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Cash%' OR lg.name LIKE '%Cash%'
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH
             ), 0)
             +
             COALESCE((
                 SELECT SUM(je.debitAmount - je.creditAmount)
                 FROM journal_entries je
                 JOIN ledgers l ON je.ledgerId = l.id
-                JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Cash%' OR lg.name LIKE '%Cash%'
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH
             ), 0)
     """)
     fun getCashBalanceFlow(): Flow<Double>
@@ -457,20 +610,68 @@ interface AccountingDao {
     @Query("""
         SELECT
             COALESCE((
-                SELECT SUM(l.openingBalance)
-                FROM ledgers l JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Bank%' OR lg.name LIKE '%Bank%'
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_BANK
             ), 0)
             +
             COALESCE((
                 SELECT SUM(je.debitAmount - je.creditAmount)
                 FROM journal_entries je
                 JOIN ledgers l ON je.ledgerId = l.id
-                JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Bank%' OR lg.name LIKE '%Bank%'
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_BANK
             ), 0)
     """)
     fun getBankBalanceFlow(): Flow<Double>
+
+    /**
+     * Cash as on a date, so a period selector can actually reach the balance.
+     *
+     * The fiscal-year chip sits inside the balance card and filtered nothing: the
+     * unbounded queries above have no date predicate and do not even join vouchers.
+     * A balance is a snapshot, so the bound is "on or before", matching the as-on
+     * convention the Balance Sheet already uses. Opening balance is unconditional —
+     * it predates the book by definition.
+     */
+    @Query("""
+        SELECT
+            COALESCE((
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH
+            ), 0)
+            +
+            COALESCE((
+                SELECT SUM(je.debitAmount - je.creditAmount)
+                FROM journal_entries je
+                JOIN ledgers l ON je.ledgerId = l.id
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                JOIN vouchers v ON je.voucherId = v.id
+                WHERE $IS_CASH AND v.date <= :asOnMillis
+            ), 0)
+    """)
+    fun getCashBalanceAsOnFlow(asOnMillis: Long): Flow<Double>
+
+    /** Bank as on a date. See [getCashBalanceAsOnFlow]. */
+    @Query("""
+        SELECT
+            COALESCE((
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_BANK
+            ), 0)
+            +
+            COALESCE((
+                SELECT SUM(je.debitAmount - je.creditAmount)
+                FROM journal_entries je
+                JOIN ledgers l ON je.ledgerId = l.id
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                JOIN vouchers v ON je.voucherId = v.id
+                WHERE $IS_BANK AND v.date <= :asOnMillis
+            ), 0)
+    """)
+    fun getBankBalanceAsOnFlow(asOnMillis: Long): Flow<Double>
 
     // ---- Analytics: real, date-bucketed report data (no fabrication) ----
 
@@ -500,9 +701,9 @@ interface AccountingDao {
     @Query("""
         SELECT
             COALESCE((
-                SELECT SUM(l.openingBalance)
-                FROM ledgers l JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Cash%' OR lg.name LIKE '%Cash%'
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH
             ), 0)
             +
             COALESCE((
@@ -510,8 +711,8 @@ interface AccountingDao {
                 FROM journal_entries je
                 JOIN vouchers v ON je.voucherId = v.id
                 JOIN ledgers l ON je.ledgerId = l.id
-                JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE (l.name LIKE '%Cash%' OR lg.name LIKE '%Cash%')
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_CASH
                   AND v.date < :windowStartMillis
             ), 0)
     """)
@@ -521,9 +722,9 @@ interface AccountingDao {
     @Query("""
         SELECT
             COALESCE((
-                SELECT SUM(l.openingBalance)
-                FROM ledgers l JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE l.name LIKE '%Bank%' OR lg.name LIKE '%Bank%'
+                SELECT SUM($SIGNED_OPENING)
+                FROM ledgers l LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_BANK
             ), 0)
             +
             COALESCE((
@@ -531,8 +732,8 @@ interface AccountingDao {
                 FROM journal_entries je
                 JOIN vouchers v ON je.voucherId = v.id
                 JOIN ledgers l ON je.ledgerId = l.id
-                JOIN ledger_groups lg ON l.groupId = lg.id
-                WHERE (l.name LIKE '%Bank%' OR lg.name LIKE '%Bank%')
+                LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+                WHERE $IS_BANK
                   AND v.date < :windowStartMillis
             ), 0)
     """)
@@ -545,8 +746,8 @@ interface AccountingDao {
         FROM journal_entries je
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
-        JOIN ledger_groups lg ON l.groupId = lg.id
-        WHERE (l.name LIKE '%Cash%' OR lg.name LIKE '%Cash%')
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE $IS_CASH
           AND v.date >= :windowStartMillis AND v.date <= :windowEndMillis
         GROUP BY dayBucket
         ORDER BY dayBucket ASC
@@ -560,8 +761,8 @@ interface AccountingDao {
         FROM journal_entries je
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
-        JOIN ledger_groups lg ON l.groupId = lg.id
-        WHERE (l.name LIKE '%Bank%' OR lg.name LIKE '%Bank%')
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE $IS_BANK
           AND v.date >= :windowStartMillis AND v.date <= :windowEndMillis
         GROUP BY dayBucket
         ORDER BY dayBucket ASC
@@ -572,16 +773,16 @@ interface AccountingDao {
         SELECT 
             l.id as id,
             l.name as name,
-            lg.name as groupName,
-            lg.category as category,
+            COALESCE(lg.name, l.groupName) as groupName,
+            COALESCE(lg.category, l.category) as category,
             COALESCE(SUM(je.debitAmount), 0) + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END as totalDebit,
             COALESCE(SUM(je.creditAmount), 0) + CASE WHEN l.balanceType = 'CR' THEN l.openingBalance ELSE 0 END as totalCredit,
             (COALESCE(SUM(je.debitAmount), 0) + CASE WHEN l.balanceType = 'DR' THEN l.openingBalance ELSE 0 END) - 
             (COALESCE(SUM(je.creditAmount), 0) + CASE WHEN l.balanceType = 'CR' THEN l.openingBalance ELSE 0 END) as currentBalance
         FROM ledgers l
-        JOIN ledger_groups lg ON l.groupId = lg.id
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
         LEFT JOIN journal_entries je ON l.id = je.ledgerId
-        WHERE l.name LIKE '%Cash%' OR l.name LIKE '%Bank%' OR lg.name LIKE '%Cash%' OR lg.name LIKE '%Bank%'
+        WHERE $IS_CASH_OR_BANK
         GROUP BY l.id
         ORDER BY l.name ASC
     """)
@@ -679,7 +880,8 @@ interface AccountingDao {
         FROM journal_entries je
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
-        WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE $IS_CASH_OR_BANK AND v.date BETWEEN :fromMillis AND :toMillis
           -- A Contra debits one of these and credits the other, so counting it would
           -- inflate both inflow and outflow by the same amount. It moves money between
           -- two accounts the business already holds; no cash enters or leaves.
@@ -694,7 +896,8 @@ interface AccountingDao {
         FROM journal_entries je
         JOIN vouchers v ON je.voucherId = v.id
         JOIN ledgers l ON je.ledgerId = l.id
-        WHERE l.systemCode IN ('CASH', 'BANK') AND v.date BETWEEN :fromMillis AND :toMillis
+        LEFT JOIN ledger_groups lg ON l.groupId = lg.id
+        WHERE $IS_CASH_OR_BANK AND v.date BETWEEN :fromMillis AND :toMillis
           AND v.voucherType != 'CONTRA'
         """
     )

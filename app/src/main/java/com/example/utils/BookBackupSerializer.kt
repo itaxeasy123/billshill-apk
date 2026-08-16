@@ -85,6 +85,8 @@ object BookBackupSerializer {
                 put("gstRegistrationDate", u.gstRegistrationDate)
                 put("gstStatus", u.gstStatus)
                 put("constitutionOfBusiness", u.constitutionOfBusiness)
+                put("upiId", u.upiId)
+                put("previousFyAggregateTurnover", u.previousFyAggregateTurnover)
                 put("filingScheme", u.filingScheme)
                 put("businessType", u.businessType.name)
                 put("enableInventory", u.enableInventory)
@@ -303,6 +305,8 @@ object BookBackupSerializer {
                 gstRegistrationDate = u.optString("gstRegistrationDate", ""),
                 gstStatus = u.optString("gstStatus", ""),
                 constitutionOfBusiness = u.optString("constitutionOfBusiness", ""),
+                upiId = u.optString("upiId", ""),
+                previousFyAggregateTurnover = u.optDouble("previousFyAggregateTurnover", -1.0),
                 filingScheme = u.optString("filingScheme", "MONTHLY"),
                 businessType = enumOrDefault(u.optString("businessType"), BusinessType.TRADING),
                 enableInventory = u.optBoolean("enableInventory", true),

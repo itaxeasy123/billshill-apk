@@ -53,7 +53,7 @@ fun FinancialHeroCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = IndianFormatter.formatRupee(amount),
-                    color = Color.White,
+                    color = OnAccent,
                     fontSize = 32.sp,
                     fontWeight = FontWeight.Bold,
                     style = MonospaceTabularTextStyle.copy(fontSize = 32.sp),
@@ -62,11 +62,11 @@ fun FinancialHeroCard(
                 Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                     shape = RoundedCornerShape(12.dp),
-                    color = Color.White.copy(alpha = 0.2f)
+                    color = PaperSurface.copy(alpha = 0.2f)
                 ) {
                     Text(
                         text = subtitle,
-                        color = Color.White,
+                        color = OnAccent,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)

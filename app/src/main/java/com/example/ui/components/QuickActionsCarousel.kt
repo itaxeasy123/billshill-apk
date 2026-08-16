@@ -7,6 +7,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.CompareArrows
@@ -72,9 +73,9 @@ fun QuickActionsCarousel(
         }
         add(
             QuickActionItem(
-                title = "Scan Invoice",
-                subtitle = "Camera & QR Code",
-                icon = Icons.Default.QrCodeScanner,
+                title = "Quick Invoice",
+                subtitle = "Manual entry",
+                icon = Icons.AutoMirrored.Filled.ReceiptLong,
                 onClick = onOpenQrScanner
             )
         )
@@ -93,7 +94,7 @@ fun QuickActionsCarousel(
                 QuickActionItem(
                     title = "Custom Expense",
                     subtitle = "Car, Loans & Misc",
-                    icon = Icons.Default.ReceiptLong,
+                    icon = Icons.AutoMirrored.Filled.ReceiptLong,
                     onClick = onOpenCustomVoucher
                 )
             )
@@ -126,7 +127,7 @@ fun QuickActionsCarousel(
             QuickActionItem(
                 title = "GST Summary",
                 subtitle = "GSTR-1 & 3B",
-                icon = Icons.Default.ReceiptLong,
+                icon = Icons.AutoMirrored.Filled.ReceiptLong,
                 onClick = onOpenGstSummary
             )
         )

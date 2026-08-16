@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import com.example.data.gst.AuditSeverity
+import com.example.data.gst.GstAuditEngine
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
@@ -97,10 +99,20 @@ fun ReportsScreen(
         }
     }
 
-    val trialBalance by viewModel.trialBalanceState.collectAsState()
+    // As on the END of the selected range. trialBalanceState reads getTrialBalanceFlow(),
+    // which carries no date predicate, so the Trial Balance and Chart of Accounts tabs
+    // printed lifetime figures under the date header at the top of this screen. A Trial
+    // Balance is an as-on snapshot, so the bound is the period end — the same asOnMillis
+    // the Balance Sheet already uses.
+    val trialBalance by viewModel.trialBalanceAsOnState.collectAsState()
     val balanceSheet by viewModel.balanceSheetState.collectAsState()
     val profitAndLoss by viewModel.profitAndLossState.collectAsState()
-    val gstSummary by viewModel.gstSummaryState.collectAsState()
+    // Period-scoped, matching the date selector at the top of the screen. This read the
+    // unbounded summary, so the Statutory GST tab and the GSTR-3B CSV reported every
+    // voucher ever posted under a heading naming the selected period — and contradicted
+    // the JSON export, which bounds to a month. A GST return covers one period.
+    val gstSummary by viewModel.gstSummaryForPeriodState.collectAsState()
+    val nominalMovement by viewModel.nominalMovementState.collectAsState()
     val totalSales by viewModel.totalSalesState.collectAsState()
     val totalPurchases by viewModel.totalPurchasesState.collectAsState()
     val inventoryItems by viewModel.inventoryState.collectAsState()
@@ -131,16 +143,16 @@ fun ReportsScreen(
     val totalInputGst = gstSummary.totalInputCgst + gstSummary.totalInputSgst + gstSummary.totalInputIgst
     val netGstPayable = totalOutputGst - totalInputGst
 
-    // Financial Metrics: GP, NP, Expenses, Cash Flow
-    val totalExpenses = trialBalance.filter { it.category == LedgerCategory.EXPENSE }.sumOf { Math.abs(it.currentBalance) }
-    val grossProfit = totalSales - totalPurchases
-    val grossProfitMargin = if (totalSales > 0) (grossProfit / totalSales) * 100.0 else 0.0
-    val netProfit = grossProfit - totalExpenses
-    val netProfitMargin = if (totalSales > 0) (netProfit / totalSales) * 100.0 else 0.0
-
-    val cashInflows = allVouchers.filter { it.voucherType == VoucherType.SALES || it.voucherType == VoucherType.RECEIPT }.sumOf { it.totalAmount }
-    val cashOutflows = allVouchers.filter { it.voucherType == VoucherType.PURCHASE || it.voucherType == VoucherType.PAYMENT }.sumOf { it.totalAmount }
-    val netCashFlow = cashInflows - cashOutflows
+    // The margin block that sat here computed netProfit = (sales - purchases) - (all
+    // EXPENSE-category ledgers), and the second term INCLUDES the Purchase Account, so
+    // purchases were deducted twice: sales 10,00,000, purchases 6,00,000 and other
+    // expenses 1,00,000 produced -3,00,000 where the truth is +3,00,000. It also derived
+    // cash flow by voucher type, counting a credit sale AND the receipt that settled it as
+    // two separate inflows. None of it was ever rendered.
+    //
+    // The real figures come from FinancialStatementEngine (profitAndLossState) and the
+    // cash and bank ledgers (cashFlowState) — computed once, rendered by the P&L and Cash
+    // Flow tabs.
 
     // Analytics tab data: real, date-ranged, straight from the ledger.
     val analyticsRange = remember(dateRangeState) { dateRangeState.toEpochMillisRange() }
@@ -155,7 +167,10 @@ fun ReportsScreen(
             .fillMaxSize()
             .padding(horizontal = 20.dp)
             .testTag("reports_screen_scroll"),
-        contentPadding = PaddingValues(top = 16.dp, bottom = 32.dp)
+        // 96dp, not 32dp: the "New Voucher" extended FAB floats over the bottom of
+        // this list, and at 32dp it sat on top of the last card's content instead of
+        // below it.
+        contentPadding = PaddingValues(top = 16.dp, bottom = 96.dp)
     ) {
         item {
             Text(
@@ -209,7 +224,11 @@ fun ReportsScreen(
                         monthlyPnlRows = monthlyPnlRows,
                         rangeStartMillis = analyticsRange.first,
                         rangeEndMillis = analyticsRange.second,
-                        trialBalance = trialBalance,
+                        // Movement in the SELECTED period, not lifetime balances. The donut
+                        // read the unbounded trial balance while the trend beside it was
+                        // date-ranged, so one date header carried April's expense trend next
+                        // to a lifetime expense donut.
+                        periodExpenseLedgers = nominalMovement,
                         modifier = Modifier.padding(bottom = 16.dp)
                     )
                 }
@@ -324,7 +343,7 @@ fun ReportsScreen(
                                     label = { Text(label, fontSize = 11.sp, maxLines = 1, softWrap = false) },
                                     colors = FilterChipDefaults.filterChipColors(
                                         selectedContainerColor = RoyalPurplePrimary,
-                                        selectedLabelColor = Color.White
+                                        selectedLabelColor = OnAccent
                                     )
                                 )
                             }
@@ -415,13 +434,13 @@ fun ReportsScreen(
                                 .fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
-                            Text("TOTAL", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1.5f))
+                            Text("TOTAL", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = OnAccent, modifier = Modifier.weight(1.5f))
                             Text(
                                 text = IndianFormatter.formatRupee(totalDebit, false),
                                 style = MonospaceTabularTextStyle,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = OnAccent,
                                 textAlign = TextAlign.End,
                                 modifier = Modifier.weight(1f)
                             )
@@ -430,7 +449,7 @@ fun ReportsScreen(
                                 style = MonospaceTabularTextStyle,
                                 fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White,
+                                color = OnAccent,
                                 textAlign = TextAlign.End,
                                 modifier = Modifier.weight(1f)
                             )
@@ -440,14 +459,35 @@ fun ReportsScreen(
             }
 
             // TAB 2: AUDIT TRAIL & GST COMPLIANCE SUMMARY
+            // TAB 2: VOUCHER & GST DATA CHECKS
+            //
+            // This tab used to print "N% COMPLIANT" over a green shield. The score was
+            // (vouchers - anomalies) / vouchers, and it was wrong four separate ways:
+            //
+            //  * the four anomaly sets OVERLAPPED and were summed as raw sizes, so one
+            //    voucher that was both zero-value and un-narrated counted twice, and
+            //    `coerceAtMost` hid the double-count instead of fixing it — a ten-voucher
+            //    book could show "10 Entries" beside "13 Issues" on the same row;
+            //  * a blank GSTIN in Settings was tested inside a PER-VOUCHER filter whose
+            //    predicate did not vary by row, so one empty field became N anomalies and
+            //    drove 30 of 35 invoices "non-compliant";
+            //  * an empty book scored 100 and drew a green VerifiedUser shield, asserting
+            //    perfect statutory compliance from no evidence at all; and
+            //  * nothing in the formula touched GST. It was a narration-and-party fill
+            //    rate wearing a GST badge, captioned "and GST tax rules".
+            //
+            // There is no defensible way to weigh a missing narration against charging the
+            // wrong tax head, so there is no score. There is a list of what is actually
+            // wrong, ordered by what it costs, and a DISTINCT count of affected vouchers.
             2 -> {
-                val zeroValueVouchers = allVouchers.filter { it.totalAmount <= 0.0 }
-                val missingPartyVouchers = allVouchers.filter { it.partyName.isBlank() || it.partyName.equals("Cash", ignoreCase = true) && it.totalAmount > 50000.0 }
-                val missingNarrationVouchers = allVouchers.filter { it.narration.isBlank() }
-                val highValueMissingGstin = allVouchers.filter { it.totalAmount > 50000.0 && it.gstAmount > 0.0 && user.gstin.isBlank() }
-
-                val totalAnomalies = zeroValueVouchers.size + missingPartyVouchers.size + missingNarrationVouchers.size + highValueMissingGstin.size
-                val complianceScore = if (allVouchers.isEmpty()) 100 else (((allVouchers.size - totalAnomalies.coerceAtMost(allVouchers.size)).toDouble() / allVouchers.size) * 100).toInt()
+                val (auditFrom, auditTo) = dateRangeState.toEpochMillisRange()
+                val auditResult = GstAuditEngine.audit(
+                    // Date-scoped, like tab 5. This read the whole book while the selector
+                    // at the top of the screen claimed to scope the page.
+                    vouchers = allVouchers.filter { it.date in auditFrom..auditTo },
+                    ledgersByName = allLedgersForGst.associateBy { it.name.trim().lowercase() },
+                    user = user
+                )
 
                 item {
                     Card(
@@ -457,61 +497,58 @@ fun ReportsScreen(
                         modifier = Modifier.fillMaxWidth().testTag("audit_trail_summary_card")
                     ) {
                         Column(modifier = Modifier.padding(20.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Icon(
-                                        imageVector = if (complianceScore >= 90) Icons.Default.VerifiedUser else Icons.Default.Warning,
-                                        contentDescription = null,
-                                        tint = if (complianceScore >= 90) AccountingGreen else AccountingRed,
-                                        modifier = Modifier.size(24.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "GST AUDIT COMPLIANCE SCORE",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = RoyalPurplePrimary,
-                                        letterSpacing = 1.sp
-                                    )
-                                }
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = if (complianceScore >= 90) AccountingGreen.copy(alpha = 0.15f) else AccountingRed.copy(alpha = 0.15f)
-                                ) {
-                                    Text(
-                                        text = "$complianceScore% COMPLIANT",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (complianceScore >= 90) AccountingGreen else AccountingRed,
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                                    )
-                                }
-                            }
-
+                            Text(
+                                text = "VOUCHER & GST DATA CHECKS",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = RoyalPurplePrimary,
+                                letterSpacing = 1.sp
+                            )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "Automated pre-filing audit engine analyzing voucher completeness, narration logs, and GST tax rules.",
+                                text = "Checks your vouchers for problems that would stop or " +
+                                    "distort a GSTR-1 / GSTR-3B export: place of supply, " +
+                                    "CGST+SGST vs IGST, buyer GSTIN format, tax rate and record " +
+                                    "completeness. It cannot see filed returns, e-invoices, " +
+                                    "e-way bills or input tax credit, so it does not tell you " +
+                                    "whether you are compliant.",
                                 fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
 
                             Spacer(modifier = Modifier.height(16.dp))
 
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Column {
-                                    Text("Total Audited Vouchers", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("${allVouchers.size} Entries", fontSize = 16.sp, fontWeight = FontWeight.Bold)
-                                }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text("Compliance Anomalies", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                    Text("$totalAnomalies Issues", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = if (totalAnomalies == 0) AccountingGreen else AccountingRed)
+                            if (auditResult.hasNothingToCheck) {
+                                // An empty period is not a clean period.
+                                Text(
+                                    text = "No vouchers in this period — nothing to check yet.",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            } else {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text("Vouchers checked", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "${auditResult.vouchersChecked}",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold
+                                        )
+                                    }
+                                    Column(horizontalAlignment = Alignment.End) {
+                                        Text("Need attention", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Text(
+                                            "${auditResult.affectedVouchers} of ${auditResult.vouchersChecked}",
+                                            fontSize = 18.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (auditResult.affectedVouchers == 0) AccountingGreen else AmberGold,
+                                            modifier = Modifier.testTag("audit_affected_voucher_count")
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -519,48 +556,83 @@ fun ReportsScreen(
                     Spacer(modifier = Modifier.height(16.dp))
                 }
 
-                // Audit Issue Category 1: Zero Value Vouchers
-                if (zeroValueVouchers.isNotEmpty()) {
+                // Business-profile problems: ONE line each. A blank GSTIN is a property of
+                // the business, not of every invoice it has ever issued.
+                if (auditResult.settingsIssues.isNotEmpty()) {
                     item {
                         Card(
                             shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = AccountingRed.copy(alpha = 0.08f)),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                            colors = CardDefaults.cardColors(containerColor = AmberGold.copy(alpha = 0.10f)),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp).testTag("audit_settings_issues_card")
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
-                                Text("⚠️ Zero / Negative Amount Vouchers (${zeroValueVouchers.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AccountingRed)
-                                Text("Vouchers with ₹0.0 value may cause GSTR-1 verification rejection.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("Your business profile", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = AmberGold)
+                                Text(
+                                    "Fix these once in Settings. They are not per-invoice problems.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                                 Spacer(modifier = Modifier.height(8.dp))
-                                zeroValueVouchers.forEach { v ->
-                                    Text("• Voucher #${v.voucherNo} (${v.partyName}) - ${v.voucherType.name}", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+                                auditResult.settingsIssues.forEach { issue ->
+                                    Text("\u2022 $issue", fontSize = 12.sp, fontWeight = FontWeight.Medium)
                                 }
                             }
                         }
                     }
                 }
 
-                // Audit Issue Category 2: Missing Narrations
-                if (missingNarrationVouchers.isNotEmpty()) {
-                    item {
-                        Card(
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
-                        ) {
-                            Column(modifier = Modifier.padding(16.dp)) {
-                                Text("📝 Vouchers Missing Audit Narration (${missingNarrationVouchers.size})", fontSize = 13.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
-                                Text("Indian Tax Law Section 44AB recommends clear audit narrations for all accounting vouchers.", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                missingNarrationVouchers.take(5).forEach { v ->
-                                    Text("• #${v.voucherNo} (${v.partyName}) - ${IndianFormatter.formatRupee(v.totalAmount)}", fontSize = 12.sp)
+                // Findings grouped by what they cost, most expensive first.
+                AuditSeverity.values().forEach { severity ->
+                    val group = auditResult.findings.filter { it.severity == severity }
+                    if (group.isNotEmpty()) {
+                        item {
+                            val tint = when (severity) {
+                                AuditSeverity.BLOCKS_EXPORT -> AccountingRed
+                                AuditSeverity.WRONG_RETURN -> AmberGold
+                                AuditSeverity.INCOMPLETE_RECORD -> RoyalPurplePrimary
+                            }
+                            Card(
+                                shape = RoundedCornerShape(20.dp),
+                                colors = CardDefaults.cardColors(containerColor = tint.copy(alpha = 0.08f)),
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(16.dp)) {
+                                    Text(
+                                        "${severity.heading} (${group.distinctBy { it.voucherId }.size} vouchers)",
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = tint
+                                    )
+                                    Text(severity.blurb, fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Spacer(modifier = Modifier.height(8.dp))
+                                    // Capped, and it says so. The old zero-value card rendered
+                                    // every row inside one lazy item, and the narration card
+                                    // showed 5 of N without ever admitting N was larger.
+                                    group.take(20).forEach { f ->
+                                        Text(
+                                            "\u2022 #${f.voucherNo} (${f.partyName.ifBlank { "no party" }}) " +
+                                                "${IndianFormatter.formatRupee(f.amount)} \u2014 ${f.detail}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Medium
+                                        )
+                                    }
+                                    if (group.size > 20) {
+                                        Text(
+                                            "\u2026and ${group.size - 20} more",
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                // Audit Success Banner
-                if (totalAnomalies == 0) {
+                // The clean case says exactly what was checked and nothing more. The old
+                // banner claimed "no tax mismatches" from a formula that checked none, and
+                // fired on an empty book.
+                if (auditResult.isClean) {
                     item {
                         Surface(
                             shape = RoundedCornerShape(20.dp),
@@ -574,8 +646,19 @@ fun ReportsScreen(
                                 Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AccountingGreen, modifier = Modifier.size(28.dp))
                                 Spacer(modifier = Modifier.width(12.dp))
                                 Column {
-                                    Text("All Vouchers Audit Ready!", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = AccountingGreen)
-                                    Text("No missing fields, tax mismatches, or zero-value anomalies found.", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "No problems found in ${auditResult.vouchersChecked} vouchers",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = AccountingGreen
+                                    )
+                                    Text(
+                                        "Place of supply, tax head, buyer GSTIN format, rate and " +
+                                            "completeness all check out for this period. This is not " +
+                                            "a statement about your filings.",
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
                         }
@@ -667,8 +750,17 @@ fun ReportsScreen(
                 val b2cLarge = classified[SupplyCategory.B2CL].orEmpty()
                 val b2cSmall = classified[SupplyCategory.B2CS].orEmpty()
 
-                val totalOutboundVal = outboundSales.sumOf { it.totalAmount }
-                val totalOutboundTax = outboundSales.sumOf { it.gstAmount }
+                // Table 9B. Credit notes were absent from every GSTR-1 surface, so this
+                // tab, its CSV and the JSON all reported outward supply GROSS while the
+                // ledgers and the GSTR-3B tab beside them reported it net.
+                val creditNotes = allVouchers.filter {
+                    it.voucherType == VoucherType.SALES_RETURN && it.date in gstFrom..gstTo
+                }
+                val creditNoteVal = creditNotes.sumOf { it.totalAmount }
+                val creditNoteTax = creditNotes.sumOf { it.gstAmount }
+
+                val totalOutboundVal = outboundSales.sumOf { it.totalAmount } - creditNoteVal
+                val totalOutboundTax = outboundSales.sumOf { it.gstAmount } - creditNoteTax
 
                 item {
                     Card(
@@ -701,6 +793,7 @@ fun ReportsScreen(
                                         val csv = CsvExporter.generateGstr1Csv(
                                             outboundSales,
                                             user,
+                                            creditNotes = creditNotes,
                                             // Without this the CSV classifies every invoice
                                             // B2C while the card above it says B2B — the same
                                             // two-surfaces-disagree failure H25 exists to stop.
@@ -781,7 +874,16 @@ fun ReportsScreen(
                             MonetaryRow(label = "B2C Large Count: ${b2cLarge.size} Invoices", amount = b2cLarge.sumOf { it.totalAmount })
 
                             Spacer(modifier = Modifier.height(10.dp))
-                            Text("3. B2C Small Invoices (Intrastate or < ₹2.5 Lakhs)", fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                            // Was "< Rs 2.5 Lakhs" — the pre-August-2024 threshold, two lines
+                            // below a caption correctly saying "> Rs 1 Lakh". It also described
+                            // the wrong RULE: B2CS is intrastate, or interstate at or BELOW the
+                            // threshold; the value test applies only to interstate supplies.
+                            // The number is read from the classifier so it cannot drift again.
+                            Text(
+                                "3. B2C Small Invoices (Intrastate, or interstate up to ${IndianFormatter.formatRupee(GstClassifier.B2CL_THRESHOLD)})",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                             MonetaryRow(label = "B2C Small Count: ${b2cSmall.size} Invoices", amount = b2cSmall.sumOf { it.totalAmount })
 
                             Spacer(modifier = Modifier.height(16.dp))
@@ -945,7 +1047,12 @@ fun ReportsScreen(
                         HierarchicalFinancialStatement(
                             statementType = StatementType.CASH_FLOW,
                             user = user,
-                            vouchers = allVouchers,
+                            // Same period as the cashFlow triple beside it. This passed every
+                            // voucher ever posted, so tapping a period-scoped inflow figure
+                            // opened a list of the entire book.
+                            vouchers = allVouchers.filter {
+                                it.date in analyticsRange.first..analyticsRange.second
+                            },
                             trialBalance = trialBalance,
                             cashFlow = cashFlow,
                             viewModel = viewModel
@@ -1044,7 +1151,32 @@ fun ReportsScreen(
 
                                 Button(
                                     onClick = {
-                                        val reportText = "GSTR-3B SUMMARY REPORT\nBusiness Name: ${user.businessName}\nGSTIN: ${user.gstin}\n\n3.1 Outward Taxable Supplies Output: ₹${totalOutputGst}\n4. Eligible Input Tax Credit: ₹${totalInputGst}\nNet GST Balance: ₹${totalInputGst - totalOutputGst}"
+                                        // Was raw Doubles interpolated straight into a
+                                        // statutory summary, so a summed value printed as
+                                        // "17999.999999999996"; and "Net GST Balance" was
+                                        // computed as input MINUS output, so an amount the
+                                        // business OWED rendered as a negative number.
+                                        //
+                                        // Now formatted, and the two directions are named
+                                        // rather than left to a sign the reader has to
+                                        // interpret. The rupee symbol comes from the
+                                        // formatter, so it is not prefixed again here.
+                                        val netPayable = totalOutputGst - totalInputGst
+                                        val netLine = if (netPayable >= 0)
+                                            "Net GST Payable: ${IndianFormatter.formatRupee(netPayable)}"
+                                        else
+                                            "Net ITC Carried Forward: ${IndianFormatter.formatRupee(-netPayable)}"
+                                        val reportText = buildString {
+                                            appendLine("GSTR-3B SUMMARY REPORT")
+                                            if (user.businessName.isNotBlank()) appendLine("Business Name: ${user.businessName}")
+                                            if (user.gstin.isNotBlank()) appendLine("GSTIN: ${user.gstin}")
+                                            appendLine()
+                                            appendLine("3.1 Outward Taxable Supplies (Output Tax): ${IndianFormatter.formatRupee(totalOutputGst)}")
+                                            appendLine("4. Eligible Input Tax Credit: ${IndianFormatter.formatRupee(totalInputGst)}")
+                                            appendLine(netLine)
+                                            appendLine()
+                                            appendLine("This is a summary. The CSV export applies the Rule 88A set-off order and is the figure to file from.")
+                                        }
                                         CsvExporter.shareTextOrPdfReport(context, "GSTR3B_Summary_${System.currentTimeMillis()}.txt", reportText)
                                     },
                                     colors = ButtonDefaults.buttonColors(containerColor = DeepPurpleSecondary),
@@ -1225,8 +1357,12 @@ fun ReportsScreen(
                                     )
                                     Spacer(modifier = Modifier.height(4.dp))
                                     Text(
-                                        text = if (netRunningGstBal >= 0) "ITC Balance = ₹${IndianFormatter.formatRupee(totalInputGst)} - Tax ₹${IndianFormatter.formatRupee(totalOutputGst)} = ₹${IndianFormatter.formatRupee(netRunningGstBal)}"
-                                        else "Liability = Tax ₹${IndianFormatter.formatRupee(totalOutputGst)} - ITC ₹${IndianFormatter.formatRupee(totalInputGst)} = ₹${IndianFormatter.formatRupee(Math.abs(netRunningGstBal))} Payable",
+                                        // formatRupee already prepends the symbol, so the
+                                        // literal one here rendered every figure as "₹₹".
+                                        text = if (netRunningGstBal >= 0)
+                                            "ITC Balance = ${IndianFormatter.formatRupee(totalInputGst)} - Tax ${IndianFormatter.formatRupee(totalOutputGst)} = ${IndianFormatter.formatRupee(netRunningGstBal)}"
+                                        else
+                                            "Liability = Tax ${IndianFormatter.formatRupee(totalOutputGst)} - ITC ${IndianFormatter.formatRupee(totalInputGst)} = ${IndianFormatter.formatRupee(Math.abs(netRunningGstBal))} Payable",
                                         fontSize = 11.sp,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
@@ -1286,7 +1422,7 @@ fun ReportsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(text = item.name, fontSize = 16.sp, fontWeight = FontWeight.Bold)
                                     Text(text = "HSN: ${item.hsnCode} • GST ${item.gstRate}%", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -1295,7 +1431,7 @@ fun ReportsScreen(
                                     color = if (item.stockQty < 0) AccountingRed.copy(alpha = 0.15f) else LavenderContainer
                                 ) {
                                     Text(
-                                        text = "${item.stockQty.toInt()} ${item.unit}",
+                                        text = "${IndianFormatter.formatQuantity(item.stockQty)} ${item.unit}",
                                         fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = if (item.stockQty < 0) AccountingRed else RoyalPurplePrimary,
@@ -1440,6 +1576,7 @@ fun ReportsScreen(
                             PdfInvoiceGenerator.generateAndShareLedgerPdf(
                                 context = context,
                                 ledgerName = selectedLedgerForStatement?.name ?: "Ledger Account",
+                                ledgerId = selectedLedgerForStatement?.id ?: 0L,
                                 groupName = selectedLedgerForStatement?.groupName ?: "General",
                                 currentBalance = selectedLedgerForStatement?.currentBalance ?: 0.0,
                                 transactions = ledgerTransactions,
@@ -1655,7 +1792,7 @@ fun ReportsScreen(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text("${imported.partyName} • ${imported.voucherType.name}", fontWeight = FontWeight.Bold, fontSize = 13.sp)
                                             Text("Date: ${imported.date} • Amt: ${IndianFormatter.formatRupee(imported.amount)}", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
@@ -1717,7 +1854,21 @@ fun ReportsScreen(
                                 // happened to contain "cash". Pinned so a re-import does not
                                 // silently move the whole balance into Cash-in-Hand.
                                 paymentMode = "BANK",
-                                narration = "${imported.narration} [Source: ${imported.source}]"
+                                narration = "${imported.narration} [Source: ${imported.source}]",
+                                // The document's own date. Every imported voucher used to be
+                                // stamped with today, so a March invoice imported in August
+                                // was filed in August's return. Falls back to now only when
+                                // the source document carried no parsable date.
+                                dateMillis = viewModel.parseIsoDate(imported.date),
+                                // REPLACE genuinely replaces now. It called addVoucher and
+                                // deleted nothing, so the book kept BOTH copies — and since
+                                // voucher numbers are issued fresh and never reused, the
+                                // duplicate could not afterwards be found by number.
+                                replacesVoucherId = if (item.chosenAction == ConflictAction.REPLACE) {
+                                    item.existingVoucher?.id
+                                } else {
+                                    null
+                                }
                             )
                         }
                         android.widget.Toast.makeText(context, "Successfully reconciled & imported XML records!", android.widget.Toast.LENGTH_SHORT).show()

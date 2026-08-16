@@ -57,7 +57,7 @@ fun VoucherTypeManagementModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = "VOUCHER TYPES & PREFIX NUMBERING",
                             fontSize = 11.sp,

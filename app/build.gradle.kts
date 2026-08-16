@@ -1,3 +1,4 @@
+import java.util.Properties
 import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesStrategy
 
 plugins {
@@ -10,10 +11,36 @@ plugins {
 }
 
 android {
+  // Backend endpoints, from a gitignored .env, surfaced as BuildConfig fields.
+  //
+  // Android has no runtime .env — the file is read here at build time, so changing it
+  // requires a rebuild rather than just a relaunch. Defaults keep the build working on a
+  // machine that has no .env at all (a fresh clone, or CI), and the OTP base URL was
+  // previously a hardcoded constant inside OtpAuthClient, which meant pointing the app at
+  // a deployed backend meant editing Kotlin.
+  val envProps = Properties().apply {
+    val f = rootProject.file(".env")
+    if (f.exists()) {
+      f.inputStream().use { stream -> load(stream) }
+    }
+  }
+  fun env(key: String, fallback: String): String =
+    (System.getenv(key) ?: envProps.getProperty(key) ?: fallback).trim()
+
   namespace = "com.example"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
+    // Read from .env at build time; see the envProps block below.
+    //
+    // The fallback is the DEPLOYED backend, never a local one. A localhost default builds
+    // an APK that works on the machine that built it and nowhere else — 10.0.2.2 is the
+    // emulator's alias for the host, so on a real phone every call fails with a connection
+    // error indistinguishable from the server being down. Wrong-but-reachable beats
+    // right-only-here: a developer who wants local overrides it in .env deliberately.
+    buildConfigField("String", "APK_API_BASE_URL", "\"${env("APK_API_BASE_URL", "https://apk.itaxeasy.com/")}\"")
+    buildConfigField("String", "OCR_API_BASE_URL", "\"${env("OCR_API_BASE_URL", "https://ocr.itaxeasy.com/api/")}\"")
+
     applicationId = "com.aistudio.mobileaccounting.vxkzp"
     minSdk = 24
     targetSdk = 36
@@ -31,13 +58,29 @@ android {
 
   sourceSets.getByName("androidTest").assets.srcDir("$projectDir/schemas")
 
+  // Release signing credentials, read from a gitignored keystore.properties if one exists
+  // and otherwise from the environment.
+  //
+  // The environment-only form meant a plain `./gradlew :app:assembleRelease` always failed
+  // with "SigningConfig release is missing required property storePassword" — the vars had
+  // to be re-exported for every single invocation, and forgetting looked like a build
+  // break rather than a missing secret. The file keeps the secret out of git (.gitignore
+  // line 23) while making the ordinary command work, and the env fallback is kept so CI
+  // can still supply them from secrets without the file being present.
+  val keystoreProps = Properties().apply {
+    val f = rootProject.file("keystore.properties")
+    if (f.exists()) {
+      f.inputStream().use { stream -> load(stream) }
+    }
+  }
+
   signingConfigs {
     create("release") {
       val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = keystoreProps.getProperty("storePassword") ?: System.getenv("STORE_PASSWORD")
+      keyAlias = keystoreProps.getProperty("keyAlias") ?: "upload"
+      keyPassword = keystoreProps.getProperty("keyPassword") ?: System.getenv("KEY_PASSWORD")
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")

@@ -8,6 +8,8 @@ import com.example.data.db.AppDatabase
 import com.example.data.db.MIGRATION_8_9
 import com.example.data.db.MIGRATION_10_11
 import com.example.data.db.MIGRATION_9_10
+import com.example.data.db.MIGRATION_14_15
+import com.example.data.db.MIGRATION_15_16
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -248,6 +250,77 @@ class MigrationTest {
             assertEquals("SAL/25-26/1042", c.getString(0))
             assertEquals(11800.0, c.getDouble(1), 0.001)
             assertEquals("q3", c.getString(2))
+        }
+    }
+
+    /**
+     * v15 adds the business's own UPI ID.
+     *
+     * Until this column existed there was nowhere to record one, so the invoice and the
+     * share-payment link both fabricated a payee as "<the user's mobile number>@upi" —
+     * an address on a live NPCI handle that the business has never asserted it owns.
+     * Existing rows must come through with a blank, never a fabricated, value.
+     */
+    @Test
+    fun migrate14To15_addsABlankUpiIdWithoutDisturbingTheProfile() {
+        helper.createDatabase(dbName, 14).apply {
+            execSQL(
+                "INSERT INTO users (id, phoneNumber, token, isLoggedIn, businessType, " +
+                    "enableInventory, businessName, gstin, firstName, middleName, surname, " +
+                    "fatherName, dob, dod, ownerName, email, address, pincode, city, state, " +
+                    "gstRegistrationDate, gstStatus, constitutionOfBusiness, filingScheme) VALUES " +
+                    "('primary_user', '9876543210', 'tok', 1, 'TRADING', 1, 'Anand Traders', " +
+                    "'07AABCU9603R1ZM', 'Anand', '', 'Kumar', '', '', '', 'Anand Kumar', " +
+                    "'a@b.com', 'Shop 4', '110001', 'Delhi', 'Delhi', '', '', '', 'MONTHLY')"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 15, true, MIGRATION_14_15)
+
+        db.query("SELECT upiId, businessName, gstin, phoneNumber FROM users WHERE id = 'primary_user'").use { c ->
+            c.moveToFirst()
+            assertEquals("must default to blank, not to a fabricated VPA", "", c.getString(0))
+            assertEquals("Anand Traders", c.getString(1))
+            assertEquals("07AABCU9603R1ZM", c.getString(2))
+            assertEquals("9876543210", c.getString(3))
+        }
+    }
+
+    /**
+     * v16 adds the declared previous-FY aggregate turnover.
+     *
+     * GSTR-1's `gt` and `cur_gt` were both assigned the current month's taxable value —
+     * two fields with different definitions carrying an identical figure. `gt` is declared
+     * rather than derived, so -1.0 ("not declared") must survive the migration and stay
+     * distinguishable from a genuine 0.0.
+     */
+    @Test
+    fun migrate15To16_addsAnUndeclaredTurnoverWithoutDisturbingTheProfile() {
+        helper.createDatabase(dbName, 15).apply {
+            execSQL(
+                "INSERT INTO users (id, phoneNumber, token, isLoggedIn, businessType, " +
+                    "enableInventory, businessName, gstin, firstName, middleName, surname, " +
+                    "fatherName, dob, dod, ownerName, email, address, pincode, city, state, " +
+                    "gstRegistrationDate, gstStatus, constitutionOfBusiness, upiId, filingScheme) VALUES " +
+                    "('primary_user', '9876543210', 'tok', 1, 'TRADING', 1, 'Anand Traders', " +
+                    "'07AABCU9603R1ZM', 'Anand', '', 'Kumar', '', '', '', 'Anand Kumar', " +
+                    "'a@b.com', 'Shop 4', '110001', 'Delhi', 'Delhi', '', '', '', " +
+                    "'anand@okhdfcbank', 'MONTHLY')"
+            )
+            close()
+        }
+
+        val db = helper.runMigrationsAndValidate(dbName, 16, true, MIGRATION_15_16)
+
+        db.query("SELECT previousFyAggregateTurnover, upiId, businessName FROM users WHERE id = 'primary_user'").use { c ->
+            c.moveToFirst()
+            assertEquals(
+                "must default to -1.0, which means NOT DECLARED — a derived 0.0 would be a false declaration",
+                -1.0, c.getDouble(0), 0.0001
+            )
+            assertEquals("anand@okhdfcbank", c.getString(1))
+            assertEquals("Anand Traders", c.getString(2))
         }
     }
 }

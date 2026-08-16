@@ -13,7 +13,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -128,6 +127,11 @@ fun AuthScreen(viewModel: AccountingViewModel) {
 
                 Spacer(modifier = Modifier.height(10.dp))
                 Text(
+                    // Says "stay on", not "never leave". Importing an invoice uploads that
+                    // one PDF to the reader service — the user asks for it and the books
+                    // themselves never go anywhere, but the absolute claim stopped being
+                    // true the moment that feature shipped, and a privacy promise is the
+                    // last piece of copy that should be approximately right.
                     text = "Your books stay on this device. The number is verified by SMS " +
                         "so only you can open them.",
                     fontSize = 11.sp,
@@ -160,14 +164,14 @@ fun AuthScreen(viewModel: AccountingViewModel) {
                         },
                         fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = OnAccent
                     )
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "Verified by SMS • Your books never leave this device",
+                    text = "Verified by SMS • Your books stay on this device",
                     fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )

@@ -25,6 +25,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import com.example.ui.theme.OnAccent
 import com.example.ui.theme.RoyalPurplePrimary
 
 class MainActivity : ComponentActivity() {
@@ -45,8 +46,10 @@ class MainActivity : ComponentActivity() {
             MyApplicationTheme(themeMode = themeMode, dynamicColor = dynamicColor) {
                 val context = LocalContext.current
                 val userState by viewModel.userState.collectAsState()
+                val allLedgers by viewModel.ledgersState.collectAsState()
                 var currentRoute by remember { mutableStateOf(NavItem.Dashboard.route) }
                 var activeVoucherType by remember { mutableStateOf(VoucherType.SALES) }
+                var gstPrefill by remember { mutableStateOf<com.example.ui.screens.VoucherGstPrefill?>(null) }
 
                 LaunchedEffect(Unit) {
                     viewModel.messageEvent.collectLatest { msg ->
@@ -83,6 +86,8 @@ class MainActivity : ComponentActivity() {
 
                     if (showMainQrScanner) {
                         com.example.ui.components.QrCodeScannerDialog(
+                            realLedgers = allLedgers,
+                            initialVoucherType = activeVoucherType,
                             onDismissRequest = { showMainQrScanner = false },
                             onInvoiceScanned = { scannedData ->
                                 viewModel.addVoucher(
@@ -109,7 +114,7 @@ class MainActivity : ComponentActivity() {
                                     icon = { Icon(Icons.Default.Add, contentDescription = "New Voucher") },
                                     text = { Text("New Voucher", fontWeight = FontWeight.Bold) },
                                     containerColor = RoyalPurplePrimary,
-                                    contentColor = androidx.compose.ui.graphics.Color.White,
+                                    contentColor = OnAccent,
                                     modifier = Modifier.testTag("shortcut_new_voucher_fab")
                                 )
                             }
@@ -138,6 +143,14 @@ class MainActivity : ComponentActivity() {
                                     viewModel = viewModel,
                                     user = user,
                                     onNavigateToVouchers = { vType ->
+                                        // Cleared so a prefill from an earlier calculator
+                                        // run cannot re-seed an unrelated later entry.
+                                        gstPrefill = null
+                                        activeVoucherType = vType
+                                        currentRoute = NavItem.Vouchers.route
+                                    },
+                                    onNavigateToVouchersWithGst = { vType, prefill ->
+                                        gstPrefill = prefill
                                         activeVoucherType = vType
                                         currentRoute = NavItem.Vouchers.route
                                     }
@@ -145,7 +158,8 @@ class MainActivity : ComponentActivity() {
                                 NavItem.Vouchers.route -> VouchersScreen(
                                     viewModel = viewModel,
                                     user = user,
-                                    initialVoucherType = activeVoucherType
+                                    initialVoucherType = activeVoucherType,
+                                    gstPrefill = gstPrefill
                                 )
                                 NavItem.Reports.route -> ReportsScreen(
                                     viewModel = viewModel,

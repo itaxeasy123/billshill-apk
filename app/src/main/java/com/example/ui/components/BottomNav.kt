@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Assessment
 import androidx.compose.material.icons.filled.Dashboard
 import androidx.compose.material.icons.filled.QrCodeScanner
@@ -31,12 +32,21 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.LavenderContainer
+import com.example.ui.theme.OnAccent
 import com.example.ui.theme.RoyalPurplePrimary
 
 sealed class NavItem(val route: String, val title: String, val icon: ImageVector) {
     object Dashboard : NavItem("dashboard", "Dashboard", Icons.Default.Dashboard)
-    object Vouchers : NavItem("vouchers", "Vouchers", Icons.Default.ReceiptLong)
-    object Scan : NavItem("scan", "Scan", Icons.Default.QrCodeScanner)
+    object Vouchers : NavItem("vouchers", "Vouchers", Icons.AutoMirrored.Filled.ReceiptLong)
+    // Was "Scan" with a QR-scanner icon. There is no camera and no OCR anywhere in this
+    // app — the manifest comment at AndroidManifest.xml says so and the CAMERA permission
+    // was deliberately removed. The dialog behind this tab is a manual entry form, and it
+    // admits as much once opened; the tab now says the same thing from the outside.
+    //
+    // One word, like its four neighbours. "Quick Entry" needs more than a fifth of a
+    // 360dp bar at 11sp, so it rendered as "Quick En…" — an ellipsis in a five-item nav
+    // bar where every other label fits.
+    object Scan : NavItem("scan", "Entry", Icons.AutoMirrored.Filled.ReceiptLong)
     object Reports : NavItem("reports", "Reports", Icons.Default.Assessment)
     object Settings : NavItem("settings", "Settings", Icons.Default.Settings)
 }
@@ -103,7 +113,7 @@ fun AccountingBottomNavBar(
                                 Surface(
                                     shape = RoundedCornerShape(12.dp),
                                     color = RoyalPurplePrimary,
-                                    contentColor = Color.White,
+                                    contentColor = OnAccent,
                                     shadowElevation = 4.dp
                                 ) {
                                     Icon(

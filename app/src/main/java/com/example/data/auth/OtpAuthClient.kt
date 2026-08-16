@@ -28,11 +28,18 @@ sealed interface OtpResult {
 object OtpAuthClient {
 
     /**
-     * `10.0.2.2` is the host machine as seen from the Android emulator — `localhost`
-     * inside the emulator is the emulator itself. Point this at the deployed host for a
-     * real build.
+     * From `APK_API_BASE_URL` in the gitignored `.env`, injected at build time.
+     *
+     * Was a hardcoded constant, so pointing the app at a deployed backend — or at a LAN
+     * IP for a physical device — meant editing Kotlin and rebuilding from source.
+     *
+     * The default is `http://10.0.2.2:54110/`: `10.0.2.2` is the host machine as seen
+     * from the Android emulator, because `localhost` inside the emulator is the emulator
+     * itself. If a request here fails with "could not reach the server", the usual cause
+     * is that the backend is not running — start it with
+     * `cd itaxeasy-apk-backend && ./dev_start.sh`.
      */
-    private const val BASE_URL = "http://10.0.2.2:54110/"
+    private val BASE_URL: String = BuildConfig.APK_API_BASE_URL
 
     private val api: AuthApi by lazy {
         val logging = HttpLoggingInterceptor().apply {

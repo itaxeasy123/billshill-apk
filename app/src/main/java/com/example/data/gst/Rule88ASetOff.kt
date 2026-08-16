@@ -40,8 +40,15 @@ data class SetOffResult(
  *
  * For output CGST 90,000 / SGST 90,000 / IGST 0 against credit IGST 1,50,000 / CGST
  * 15,000 / SGST 15,000, that reported CGST ₹75,000, SGST ₹75,000 and a total of ₹0 —
- * four cells of one row contradicting each other by ₹1,50,000, with the correct answer
- * (₹15,000) appearing nowhere.
+ * four cells of one row contradicting each other by ₹1,50,000. The correct answer is ₹0
+ * in cash: total liability 1,80,000 against total credit 1,80,000, and Rule 88A permits
+ * an ordering that clears it exactly. The total cell happened to land on that ₹0, but only
+ * by cancelling an unclamped -1,50,000 against the +1,50,000 the head cells had already
+ * been clamped away from — it agreed with the right answer by accident while the two head
+ * cells beside it demanded ₹1,50,000 in cash.
+ *
+ * (₹15,000 is the GREEDY figure — push all the IGST credit at CGST first, strand CGST's
+ * own 15,000, pay 15,000 for SGST. Equally legal under Rule 88A and strictly worse.)
  *
  * The mechanism is worth naming because it is not a rounding problem: a set-off step has
  * **two** outputs per head — cash payable *and* credit carried forward. `coerceAtLeast(0)`

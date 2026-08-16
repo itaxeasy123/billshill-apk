@@ -18,6 +18,7 @@ import com.example.service.BookBackupStore
 import com.example.service.QuickActionsWidgetProvider
 import com.example.utils.FiscalYearUtils
 import com.example.utils.GstCalculationService
+import com.example.utils.Money
 import com.example.utils.IndianFormatter
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.*
@@ -114,12 +115,81 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
     val orphanedLedgerCountState: StateFlow<Int> = repository.orphanedLedgerCountFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
 
+    /**
+     * The DASHBOARD's own period, independent of [_analyticsDateRange].
+     *
+     * The two screens share one activity-scoped ViewModel, so the Dashboard chart followed
+     * whatever range the Reports date selector had last written — a card captioned
+     * "current financial year" redrew itself as a single month after a visit to Reports,
+     * with nothing on the Dashboard able to set it back. Null means all time, which is
+     * what the FY chip's ALL_TIME option means.
+     */
+    private val _dashboardDateRange = MutableStateFlow<Pair<Long, Long>?>(null)
+
+    fun setDashboardDateRange(range: Pair<Long, Long>?) {
+        if (_dashboardDateRange.value != range) _dashboardDateRange.value = range
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dashboardMonthlyPnlState: StateFlow<List<MonthlyPnlRow>> = _dashboardDateRange
+        .flatMapLatest { range ->
+            val (from, to) = range ?: (0L to Long.MAX_VALUE)
+            repository.monthlyPnlFlow(from, to)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Cash as on the end of the Dashboard's selected period. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dashboardCashBalanceState: StateFlow<Double> = _dashboardDateRange
+        .flatMapLatest { range -> repository.cashBalanceAsOnFlow(range?.second ?: Long.MAX_VALUE) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    /** Bank as on the end of the Dashboard's selected period. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val dashboardBankBalanceState: StateFlow<Double> = _dashboardDateRange
+        .flatMapLatest { range -> repository.bankBalanceAsOnFlow(range?.second ?: Long.MAX_VALUE) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0.0)
+
+    /**
+     * Trial Balance as on the period END — the same as-on query the Balance Sheet uses.
+     *
+     * [trialBalanceState] carries no date bound at all, so the Trial Balance and Chart of
+     * Accounts tabs printed lifetime figures under the date header at the top of the
+     * Reports screen. A Trial Balance is an as-on snapshot, not a movement.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val trialBalanceAsOnState: StateFlow<List<LedgerWithBalance>> = _analyticsDateRange
+        .flatMapLatest { (_, to) -> repository.balancesAsOnFlow(to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Per-ledger revenue/expense movement in the selected period. Feeds the expense donut. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val nominalMovementState: StateFlow<List<LedgerWithBalance>> = _analyticsDateRange
+        .flatMapLatest { (from, to) -> repository.nominalMovementFlow(from, to) }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     fun setAnalyticsDateRange(fromMillis: Long, toMillis: Long) {
         val next = fromMillis to toMillis
         if (_analyticsDateRange.value != next) {
             _analyticsDateRange.value = next
         }
     }
+
+    /**
+     * GST for the SELECTED period, driven by the same range the Reports date selector sets.
+     *
+     * The Statutory GST tab and the GSTR-3B CSV both read the unbounded [gstSummaryState],
+     * so they reported every voucher ever posted beneath a heading naming the period — and
+     * contradicted the JSON export, which bounds to a month. A GST return covers exactly
+     * one month or quarter.
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val gstSummaryForPeriodState: StateFlow<GstSummaryReport> = _analyticsDateRange
+        .flatMapLatest { (from, to) -> repository.gstSummaryForPeriodFlow(from, to) }
+        .stateIn(
+            viewModelScope, SharingStarted.WhileSubscribed(5000),
+            GstSummaryReport(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+        )
 
     val gstSummaryState: StateFlow<GstSummaryReport> = repository.gstSummaryFlow
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), GstSummaryReport(0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
@@ -491,10 +561,44 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Entries and distinct vouchers posted against [id], for the confirm dialog. */
+    suspend fun ledgerUsage(id: Long): Pair<Int, Int> = repository.ledgerUsage(id)
+
+    /**
+     * The success message used to be emitted unconditionally, so a delete that destroyed
+     * one side of every posting still reported "Ledger deleted." Each outcome now says
+     * what actually happened; the exhaustive `when` means a future outcome cannot quietly
+     * fall through into a success toast.
+     */
     fun deleteLedger(id: Long, name: String) {
         viewModelScope.launch {
-            repository.deleteLedger(id)
-            _messageEvent.emit("Ledger '$name' deleted.")
+            val message = try {
+                when (val result = repository.deleteLedger(id)) {
+                    is AccountingRepository.LedgerDeleteResult.Deleted ->
+                        "Ledger '$name' deleted."
+
+                    is AccountingRepository.LedgerDeleteResult.NotFound ->
+                        "Ledger '$name' no longer exists."
+
+                    is AccountingRepository.LedgerDeleteResult.SystemLedger ->
+                        "'$name' is a system account (${result.code}) used by every " +
+                            "receipt, payment and contra. It cannot be deleted."
+
+                    is AccountingRepository.LedgerDeleteResult.HasPostings ->
+                        "'$name' is used by ${result.entryCount} journal " +
+                            (if (result.entryCount == 1) "entry" else "entries") +
+                            " across ${result.voucherCount} " +
+                            (if (result.voucherCount == 1) "voucher" else "vouchers") +
+                            ". Delete or amend those vouchers first."
+                }
+            } catch (e: Exception) {
+                // The RESTRICT foreign key is the backstop behind the guard above. If it
+                // ever fires, the delete was refused by SQLite and nothing was destroyed —
+                // but this runs in viewModelScope, where an uncaught throw would take the
+                // process down instead of telling the user.
+                "Could not delete '$name': ${e.message ?: "the ledger is still in use."}"
+            }
+            _messageEvent.emit(message)
         }
     }
 
@@ -539,6 +643,23 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
         partyGstin: String = "",
         /** CASH, BANK or CREDIT. Was inferred from the party's name (H3). */
         paymentMode: String = "CASH",
+        /**
+         * The document's own date. Null means "now".
+         *
+         * There was no such parameter, so every imported voucher was stamped
+         * System.currentTimeMillis() — a March invoice imported in August landed in
+         * August's GSTR-1, in the wrong return period, with no way to correct it.
+         */
+        dateMillis: Long? = null,
+        /**
+         * A voucher this one replaces, deleted in the same operation.
+         *
+         * The XML importer's REPLACE action called addVoucher without removing anything,
+         * so "replace" appended and the book ended up holding both copies — and because
+         * voucher numbers are issued fresh and never reused, the duplicate could not even
+         * be found by number afterwards.
+         */
+        replacesVoucherId: Long? = null,
         // Defaults to true because every other entry path (QR scan, bulk import, Tally
         // XML, quick entry) supplies a bill total that already includes tax. Only the
         // voucher wizard, which shows the user an Exclusive/Inclusive toggle, passes
@@ -555,12 +676,35 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 _messageEvent.emit("Please enter a valid positive amount")
                 return@launch
             }
+            // The amount was validated above; the rate never was. `?: 18.0` only caught
+            // unparseable text, so 200, 18.7 and — because toDoubleOrNull accepts it —
+            // "Infinity" all reached the posting engine. A 200% rate books two thirds of
+            // an invoice as tax; a non-slab rate is reverse-engineered back out at export
+            // by deriveGstRate, which snaps only within 0.05, so GSTR-1 receives
+            // "rt": 200.0024 and the portal rejects the WHOLE return weeks later,
+            // pointing at the file rather than at the voucher that caused it.
             val gstRate = gstRateText.toDoubleOrNull() ?: 18.0
+            if (!gstRate.isFinite() || gstRate < 0.0) {
+                _messageEvent.emit("Please enter a valid GST rate")
+                return@launch
+            }
+            if (gstRate !in GstCalculationService.SLABS) {
+                _messageEvent.emit(
+                    "$gstRate% is not a GST slab. Use one of: " +
+                        GstCalculationService.SLABS.joinToString(", ") {
+                            if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+                        } + "%"
+                )
+                return@launch
+            }
             val qty = qtyText.toDoubleOrNull() ?: 1.0
 
             // Gross up here, once, at the boundary — the repository and everything
             // below it treat the amount they receive as tax-inclusive.
             val grossAmount = GstCalculationService.toGrossAmount(amount, gstRate, isGstInclusive)
+
+            // Removed BEFORE the replacement is posted, so the book never holds both.
+            replacesVoucherId?.let { repository.deleteVoucher(it) }
 
             repository.createVoucher(
                 voucherType = type,
@@ -573,9 +717,34 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 itemQuantity = qty,
                 tags = tags,
                 partyGstin = partyGstin,
-                paymentMode = paymentMode
+                paymentMode = paymentMode,
+                dateMillis = dateMillis
             )
             _messageEvent.emit("Voucher created & debits/credits balanced automatically!")
+        }
+    }
+
+    /**
+     * Logs a petty-cash expense. Dr the expense category, Cr cash — see
+     * [AccountingRepository.postPettyExpense] for what this replaces.
+     */
+    fun addPettyExpense(category: String, amountText: String, narration: String) {
+        viewModelScope.launch {
+            val amount = amountText.toDoubleOrNull()
+            if (amount == null || amount <= 0.0) {
+                _messageEvent.emit("Enter a valid petty cash amount")
+                return@launch
+            }
+            if (category.isBlank()) {
+                _messageEvent.emit("Describe the expense so it can be categorised")
+                return@launch
+            }
+            repository.postPettyExpense(
+                category = category.trim(),
+                amount = Money.paise(amount),
+                narration = narration
+            )
+            _messageEvent.emit("Logged ${IndianFormatter.formatRupee(Money.paise(amount))} to $category")
         }
     }
 
@@ -645,6 +814,9 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
      * calendar day; forcing UTC here would shift the voucher a day earlier in every
      * report for any device west of UTC.
      */
+    /** Parses "yyyy-MM-dd", the shape the XML importer normalises its dates to. */
+    fun parseIsoDate(dateStr: String): Long? = parseEntryDate(dateStr)
+
     private fun parseEntryDate(dateStr: String): Long? {
         val fmt = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.ENGLISH).apply {
             isLenient = false
@@ -792,12 +964,36 @@ class AccountingViewModel(application: Application) : AndroidViewModel(applicati
                 _messageEvent.emit("Party Name is required")
                 return@launch
             }
-            val amount = amountText.toDoubleOrNull()
-            if (amount == null || amount <= 0) {
+            val enteredAmount = amountText.toDoubleOrNull()
+            if (enteredAmount == null || enteredAmount <= 0) {
                 _messageEvent.emit("Please enter a valid positive amount")
                 return@launch
             }
+            // Quantised, as the create path is via toGrossAmount. The amend path passed the
+            // raw Double straight through, so an edited amount could carry sub-paisa
+            // precision that the journal legs — built from the quantised breakdown — do not.
+            // Two edits were enough to accumulate Rs 0.01 and trip the "your books do not
+            // balance" banner, against roughly 10^12 vouchers for the ordinary rounding
+            // residue. amountText is always the GST-inclusive total here, seeded from
+            // voucher.totalAmount, so there is no inclusive/exclusive decision to make.
+            val amount = Money.paise(enteredAmount)
+
             val gstRate = gstRateText.toDoubleOrNull() ?: 0.0
+            // Same guard as the create path: an amendment must not be able to introduce a
+            // rate that entry validation would have refused.
+            if (!gstRate.isFinite() || gstRate < 0.0) {
+                _messageEvent.emit("Please enter a valid GST rate")
+                return@launch
+            }
+            if (gstRate !in GstCalculationService.SLABS) {
+                _messageEvent.emit(
+                    "$gstRate% is not a GST slab. Use one of: " +
+                        GstCalculationService.SLABS.joinToString(", ") {
+                            if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+                        } + "%"
+                )
+                return@launch
+            }
 
             repository.amendVoucher(
                 voucherId = voucherId,

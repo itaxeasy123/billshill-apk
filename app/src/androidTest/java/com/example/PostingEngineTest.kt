@@ -4,6 +4,7 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.example.data.db.AppDatabase
+import com.example.data.model.LedgerCategory
 import com.example.data.model.VoucherType
 import com.example.data.repository.AccountingRepository
 import com.example.service.DatabaseSeedEngine
@@ -295,5 +296,137 @@ class PostingEngineTest {
             70.0, db.accountingDao().getInventoryItemById(id)!!.stockQty, 0.001
         )
         assertEquals(0.0, journalImbalance(), 0.005)
+    }
+
+    @Test
+    fun aPettyExpenseLandsInExpensesAndNotOnALiability() = runBlocking {
+        // The Dashboard's petty-cash button posted a PAYMENT whose partyName was the
+        // expense CATEGORY. getOrCreatePartyLedger files a PAYMENT counterparty under
+        // Sundry Creditors as a LIABILITY, and the PAYMENT branch then debits it — so
+        // Rs 1,000 of tea became a debit to a liability named "Refreshments & Hospitality",
+        // absent from the P&L, the expense bars and the Reports donut, while the Balance
+        // Sheet still tied perfectly. An expense that disappears without breaking a
+        // balance check is exactly what no report in the app could have caught.
+        repo.postPettyExpense(
+            category = "Refreshments & Hospitality",
+            amount = 1_000.0,
+            narration = "Petty Expense: tea for the shop"
+        )
+
+        val ledger = db.accountingDao().getLedgerByName("Refreshments & Hospitality")!!
+        assertEquals(
+            "a petty expense must be an EXPENSE, not a liability",
+            LedgerCategory.EXPENSE, ledger.category
+        )
+
+        val entries = db.accountingDao().getAllJournalEntriesList()
+        val expenseLeg = entries.single { it.ledgerId == ledger.id }
+        assertEquals("and it must be DEBITED", 1_000.0, expenseLeg.debitAmount, 0.005)
+        assertEquals(0.0, expenseLeg.creditAmount, 0.005)
+
+        val cash = db.accountingDao().getLedgerBySystemCode("CASH")!!
+        val cashLeg = entries.single { it.ledgerId == cash.id }
+        assertEquals("cash must be credited", 1_000.0, cashLeg.creditAmount, 0.005)
+
+        assertEquals("and the books still tie", 0.0, journalImbalance(), 0.005)
+    }
+
+    // ---- Ledger deletion -------------------------------------------------------------
+    //
+    // deleteLedger used to delete the ledger's journal entries and then the ledger,
+    // stepping around the ON DELETE RESTRICT that exists to stop exactly that. The other
+    // legs of every affected voucher survived, so a balanced book was left permanently
+    // out with no undo while the toast reported success. Nothing covered it.
+
+    @Test
+    fun deletingALedgerWithPostingsIsRefusedAndTheBooksStillTie() = runBlocking {
+        repo.createVoucher(
+            voucherType = VoucherType.SALES, partyName = "Anand Traders",
+            amount = 11_800.0, gstRate = 18.0, isInterstate = false, narration = "sale"
+        )
+        assertEquals(0.0, journalImbalance(), 0.005)
+
+        val party = db.accountingDao().getLedgerByName("Anand Traders")!!
+        val entriesBefore = db.accountingDao().getAllJournalEntriesList().size
+        assertTrue("the fixture must actually post to this ledger", entriesBefore > 0)
+
+        val result = repo.deleteLedger(party.id)
+
+        assertTrue(
+            "a ledger carrying postings must be refused, was $result",
+            result is AccountingRepository.LedgerDeleteResult.HasPostings
+        )
+        assertTrue("the ledger must survive", db.accountingDao().getLedgerById(party.id) != null)
+        assertEquals(
+            "not one journal row may be destroyed",
+            entriesBefore, db.accountingDao().getAllJournalEntriesList().size
+        )
+        assertEquals("the books must still tie", 0.0, journalImbalance(), 0.005)
+    }
+
+    @Test
+    fun refusingALedgerReportsWhatIsBlockingIt() = runBlocking {
+        // Two vouchers against one party: the message has to name vouchers, not entries,
+        // because vouchers are what the user has to go and act on.
+        repo.createVoucher(VoucherType.SALES, "Anand Traders", 11_800.0, 18.0, false, "one")
+        repo.createVoucher(VoucherType.SALES, "Anand Traders", 5_900.0, 18.0, false, "two")
+
+        val party = db.accountingDao().getLedgerByName("Anand Traders")!!
+        val result = repo.deleteLedger(party.id)
+
+        result as AccountingRepository.LedgerDeleteResult.HasPostings
+        assertEquals("both vouchers must be counted", 2, result.voucherCount)
+        assertTrue("entries must outnumber vouchers", result.entryCount >= result.voucherCount)
+        assertEquals(0.0, journalImbalance(), 0.005)
+    }
+
+    @Test
+    fun deletingAnUnusedLedgerStillWorks() = runBlocking {
+        // The legitimate case the refusal must not break: a ledger created by mistake.
+        val id = repo.createLedger(
+            name = "Typo Ledger", groupName = "Indirect Expenses",
+            category = LedgerCategory.EXPENSE
+        )
+
+        assertEquals(
+            "a ledger with no postings must still be deletable",
+            AccountingRepository.LedgerDeleteResult.Deleted, repo.deleteLedger(id)
+        )
+        assertTrue(db.accountingDao().getLedgerById(id) == null)
+        assertEquals(0.0, journalImbalance(), 0.005)
+    }
+
+    @Test
+    fun aSystemLedgerIsNeverDeletable() = runBlocking {
+        // Cash seeds with zero postings, so before the guard it deleted cleanly — and
+        // getOrCreateSystemLedger then recreated an empty one under its default name,
+        // leaving the books looking plausible with the history gone.
+        val cash = db.accountingDao().getLedgerBySystemCode("CASH")!!
+
+        val result = repo.deleteLedger(cash.id)
+
+        assertEquals(
+            "a system ledger must never be deletable",
+            AccountingRepository.LedgerDeleteResult.SystemLedger("CASH"), result
+        )
+        assertTrue(db.accountingDao().getLedgerBySystemCode("CASH") != null)
+        assertEquals(0.0, journalImbalance(), 0.005)
+    }
+
+    @Test
+    fun deletingTheVouchersFirstThenTheLedgerIsTheWorkingRoute() = runBlocking {
+        // The escape hatch the refusal points the user at has to actually work end to end.
+        repo.createVoucher(VoucherType.SALES, "One Off Buyer", 11_800.0, 18.0, false, "sale")
+        val party = db.accountingDao().getLedgerByName("One Off Buyer")!!
+
+        val sale = db.accountingDao().getAllVouchersList().first { it.voucherType == VoucherType.SALES }
+        repo.deleteVoucher(sale.id)
+
+        assertEquals(
+            "with its vouchers gone the ledger is childless and deletable",
+            AccountingRepository.LedgerDeleteResult.Deleted, repo.deleteLedger(party.id)
+        )
+        assertTrue(db.accountingDao().getLedgerById(party.id) == null)
+        assertEquals("and the books still tie", 0.0, journalImbalance(), 0.005)
     }
 }

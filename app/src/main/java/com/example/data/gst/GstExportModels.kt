@@ -99,6 +99,58 @@ data class Gstr1B2clGroup(
     @SerializedName("inv") val inv: List<Gstr1B2clInvoice>
 )
 
+/**
+ * GSTR-1 Table 9B — a credit or debit note issued to a REGISTERED person (CDNR).
+ *
+ * No such model existed and [Gstr1Payload] had no `cdnr` key, so SALES_RETURN vouchers
+ * were filtered out of the export entirely. Every ledger, the Trial Balance, the P&L and
+ * the app's own GST summary net a credit note; only the filed return did not, so it
+ * overstated output liability by the full value of every credit note issued.
+ *
+ * Values are POSITIVE and [ntty] carries the direction — the portal does the subtracting.
+ * That happens to match how this app stores a SALES_RETURN: positive totalAmount and
+ * gstAmount, with the reversal expressed by flipping which legs are debited.
+ *
+ * The original invoice's number and date are deliberately absent. They are not in the
+ * current schema, and VoucherEntity carries no link from a return to the sale it
+ * reverses, so they could only have been fabricated.
+ */
+data class Gstr1CreditNote(
+    /** "C" credit note, "D" debit note. */
+    @SerializedName("ntty") val ntty: String = "C",
+    /** The NOTE's own number, not the original invoice's. */
+    @SerializedName("nt_num") val ntNum: String,
+    @SerializedName("nt_dt") val ntDt: String,
+    @SerializedName("pos") val pos: String,
+    @SerializedName("rchrg") val rchrg: String = "N",
+    @SerializedName("inv_typ") val invTyp: String = "R",
+    @SerializedName("val") val valAmt: Double,
+    @SerializedName("itms") val itms: List<Gstr1InvoiceItem>
+)
+
+data class Gstr1CdnrGroup(
+    @SerializedName("ctin") val ctin: String,
+    @SerializedName("nt") val nt: List<Gstr1CreditNote>
+)
+
+/**
+ * GSTR-1 Table 9B for an UNREGISTERED recipient (CDNUR). Flat: there is no counterparty
+ * GSTIN to group by.
+ *
+ * [typ] admits only "B2CL", "EXPWP" and "EXPWOP". A credit note against a *small* B2C
+ * supply has no CDNUR row at all — it nets into the Table 7 (B2CS) aggregate. Emitting
+ * typ="B2CS" here would be rejected.
+ */
+data class Gstr1CdnurNote(
+    @SerializedName("typ") val typ: String = "B2CL",
+    @SerializedName("ntty") val ntty: String = "C",
+    @SerializedName("nt_num") val ntNum: String,
+    @SerializedName("nt_dt") val ntDt: String,
+    @SerializedName("pos") val pos: String,
+    @SerializedName("val") val valAmt: Double,
+    @SerializedName("itms") val itms: List<Gstr1InvoiceItem>
+)
+
 data class Gstr1Payload(
     @SerializedName("gstin") val gstin: String,
     @SerializedName("fp") val fp: String, // MMYYYY
@@ -107,6 +159,8 @@ data class Gstr1Payload(
     @SerializedName("b2b") val b2b: List<Gstr1B2bGroup>,
     @SerializedName("b2cl") val b2cl: List<Gstr1B2clGroup> = emptyList(),
     @SerializedName("b2cs") val b2cs: List<Gstr1B2csItem>,
+    @SerializedName("cdnr") val cdnr: List<Gstr1CdnrGroup> = emptyList(),
+    @SerializedName("cdnur") val cdnur: List<Gstr1CdnurNote> = emptyList(),
     @SerializedName("hsn") val hsn: Gstr1HsnData,
     @SerializedName("doc_issue") val docIssue: Gstr1DocSummary
 )
@@ -139,10 +193,29 @@ data class Gstr3bItcItem(
     @SerializedName("csamt") val csamt: Double = 0.0
 )
 
+/**
+ * Table 4(C), net ITC = 4(A) minus 4(B).
+ *
+ * No `ty` member: the 3B schema tags the availment and reversal rows, never the net.
+ * This was typed [Gstr3bItcItem], so `itc_net` emitted a stray `"ty":"OTH"` — and the
+ * engine passed the SAME object as `itc_avl[0]`, which made net ITC structurally
+ * incapable of differing from gross.
+ *
+ * Unlike Table 3.1 this is allowed to be NEGATIVE: reversal exceeding availment is a
+ * real outcome that adds to the period's liability. Do not clamp it.
+ */
+data class Gstr3bItcNet(
+    @SerializedName("iamt") val iamt: Double = 0.0,
+    @SerializedName("camt") val camt: Double = 0.0,
+    @SerializedName("samt") val samt: Double = 0.0,
+    @SerializedName("csamt") val csamt: Double = 0.0
+)
+
 data class Gstr3bItcElg(
     @SerializedName("itc_avl") val itcAvl: List<Gstr3bItcItem>,
+    /** Table 4(B). "RUL" = Rules 42/43; "OTH" = Others, where a purchase return goes. */
     @SerializedName("itc_rev") val itcRev: List<Gstr3bItcItem> = emptyList(),
-    @SerializedName("itc_net") val itcNet: Gstr3bItcItem
+    @SerializedName("itc_net") val itcNet: Gstr3bItcNet
 )
 
 data class Gstr3bPayload(

@@ -1,5 +1,6 @@
 package com.example.ui.screens
 
+import com.example.utils.Money
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
@@ -12,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ReceiptLong
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Calculate
 import androidx.compose.material.icons.filled.Check
@@ -48,6 +50,7 @@ import com.example.ui.theme.*
 import androidx.compose.foundation.background
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.QrCodeScanner
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowForward
@@ -57,13 +60,34 @@ import com.example.utils.GstCalculationService
 import com.example.utils.IndianFormatter
 import com.example.utils.PdfInvoiceGenerator
 import java.util.Calendar
+import com.example.ui.components.ChoiceChip
+import com.example.ui.components.ChoiceChipRow
+
+/** Figures carried from the Dashboard GST calculator into the voucher wizard. */
+data class VoucherGstPrefill(
+    val amountText: String,
+    val gstRateText: String,
+    val isGstInclusive: Boolean,
+    val isInterstate: Boolean
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VouchersScreen(
     viewModel: AccountingViewModel,
     user: UserEntity,
-    initialVoucherType: VoucherType = VoucherType.Sale
+    initialVoucherType: VoucherType = VoucherType.Sale,
+    /**
+     * Figures handed over by the Dashboard's GST calculator.
+     *
+     * Its "Use in Voucher" button used to bind all four computed values and drop them on
+     * the floor, opening a form with no GST field that hardcoded the rate to 0 — so the
+     * tax the user had just calculated could not be recorded even by retyping it. They
+     * arrive here instead, in the one form that actually posts Output/Input CGST-SGST-IGST
+     * legs, and the user supplies the two things a calculator cannot know: the party and
+     * whether it is a sale or a purchase.
+     */
+    gstPrefill: VoucherGstPrefill? = null
 ) {
     val visibleVoucherTypes = remember { // STOCK_OPENING is posted automatically when an item is created with a
     // quantity on hand. Hand-writing one has no item attached, so it would credit
@@ -77,9 +101,9 @@ fun VouchersScreen(
     var partyGstin by remember { mutableStateOf("") }
     // How the money moved. Was inferred from a substring of the party's name (H3).
     var paymentMode by remember { mutableStateOf("CASH") }
-    var amountText by remember { mutableStateOf("") }
-    var selectedGstRate by remember { mutableStateOf("18") }
-    var isInterstate by remember { mutableStateOf(false) }
+    var amountText by remember(gstPrefill) { mutableStateOf(gstPrefill?.amountText ?: "") }
+    var selectedGstRate by remember(gstPrefill) { mutableStateOf(gstPrefill?.gstRateText ?: "18") }
+    var isInterstate by remember(gstPrefill) { mutableStateOf(gstPrefill?.isInterstate ?: false) }
     var narration by remember { mutableStateOf("") }
     var qtyText by remember { mutableStateOf("1") }
     var tagsText by remember { mutableStateOf("") }
@@ -172,7 +196,7 @@ fun VouchersScreen(
         matchesQuery && matchesType && matchesDate
     }
 
-    var isGstInclusive by remember { mutableStateOf(false) }
+    var isGstInclusive by remember(gstPrefill) { mutableStateOf(gstPrefill?.isGstInclusive ?: false) }
     var showGstCalculatorTool by remember { mutableStateOf(false) }
 
     // Tax calculation preview (Inclusive vs Exclusive).
@@ -226,9 +250,9 @@ fun VouchersScreen(
                         contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
                         modifier = Modifier.height(36.dp).testTag("open_qr_scanner_btn")
                     ) {
-                        Icon(Icons.Default.QrCodeScanner, contentDescription = null, modifier = Modifier.size(15.dp))
+                        Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(15.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("Scan QR", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                        Text("Quick Entry", fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
                     }
 
                     FilledTonalButton(
@@ -289,7 +313,7 @@ fun VouchersScreen(
                                     fontSize = 11.sp,
                                     fontWeight = if (isActive) FontWeight.Bold else FontWeight.Medium,
                                     color = when {
-                                        isActive -> Color.White
+                                        isActive -> OnAccent
                                         isCompleted -> AccountingGreen
                                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                                     },
@@ -325,7 +349,7 @@ fun VouchersScreen(
                                         label = { Text(type.displayName, fontSize = 11.sp) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = RoyalPurplePrimary,
-                                            selectedLabelColor = Color.White
+                                            selectedLabelColor = OnAccent
                                         ),
                                         modifier = Modifier.padding(end = 6.dp)
                                     )
@@ -460,10 +484,15 @@ fun VouchersScreen(
                                         )
                                         inventoryItems.forEach { item ->
                                             DropdownMenuItem(
-                                                text = { Text("${item.name} (${item.unit}) • Stock: ${item.stockQty.toInt()}") },
+                                                text = { Text("${item.name} (${item.unit}) • Stock: ${IndianFormatter.formatQuantity(item.stockQty)}") },
                                                 onClick = {
                                                     selectedItem = item
-                                                    selectedGstRate = item.gstRate.toInt().toString()
+                                                    // toInt() turned a 0.25% item (gold,
+                                                    // rough diamonds) into 0% — a taxed
+                                                    // supply filed as nil-rated.
+                                                    selectedGstRate = item.gstRate.let {
+                                                        if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+                                                    }
                                                     if (selectedVoucherType == VoucherType.SALES) {
                                                         amountText = (item.sellingPrice * (qtyText.toDoubleOrNull() ?: 1.0)).toString()
                                                     }
@@ -544,7 +573,7 @@ fun VouchersScreen(
                                             label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
                                             colors = FilterChipDefaults.filterChipColors(
                                                 selectedContainerColor = RoyalPurplePrimary,
-                                                selectedLabelColor = Color.White
+                                                selectedLabelColor = OnAccent
                                             ),
                                             modifier = Modifier.testTag("payment_mode_$mode")
                                         )
@@ -576,23 +605,18 @@ fun VouchersScreen(
                                     }
                                 }
                                 Spacer(modifier = Modifier.height(4.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    FilterChip(
+                                ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
+                                    ChoiceChip(
+                                        label = "Add GST",
                                         selected = !isGstInclusive,
                                         onClick = { isGstInclusive = false },
-                                        label = { Text("Exclusive (+ Tax)", fontSize = 11.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White),
-                                        modifier = Modifier.weight(1f)
+                                        fontSize = 11.sp
                                     )
-                                    FilterChip(
+                                    ChoiceChip(
+                                        label = "Extract GST",
                                         selected = isGstInclusive,
                                         onClick = { isGstInclusive = true },
-                                        label = { Text("Inclusive (Incl. Tax)", fontSize = 11.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White),
-                                        modifier = Modifier.weight(1f)
+                                        fontSize = 11.sp
                                     )
                                 }
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -607,7 +631,7 @@ fun VouchersScreen(
                                             selected = selectedGstRate == rate,
                                             onClick = { selectedGstRate = rate },
                                             label = { Text("$rate%", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White)
+                                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = OnAccent)
                                         )
                                     }
                                 }
@@ -619,7 +643,7 @@ fun VouchersScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Column {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text("Inter-State Transaction (IGST)", fontSize = 13.sp, fontWeight = FontWeight.Medium)
                                         Text(if (isInterstate) "Applies 100% IGST" else "Splits 50% CGST + 50% SGST", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
@@ -816,9 +840,9 @@ fun VouchersScreen(
                                         .height(48.dp)
                                         .testTag("submit_voucher_button")
                                 ) {
-                                    Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = Color.White)
+                                    Icon(imageVector = Icons.Default.Check, contentDescription = null, tint = OnAccent)
                                     Spacer(modifier = Modifier.width(6.dp))
-                                    Text("Save Voucher", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                    Text("Save Voucher", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = OnAccent)
                                 }
                             }
                         }
@@ -835,7 +859,7 @@ fun VouchersScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "Daybook Voucher Audit Log",
                         fontSize = 18.sp,
@@ -892,7 +916,7 @@ fun VouchersScreen(
                         label = { Text(label, fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = RoyalPurplePrimary,
-                            selectedLabelColor = Color.White
+                            selectedLabelColor = OnAccent
                         )
                     )
                 }
@@ -910,7 +934,7 @@ fun VouchersScreen(
                         label = { Text(label, fontSize = 11.sp) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = DeepPurpleSecondary,
-                            selectedLabelColor = Color.White
+                            selectedLabelColor = OnAccent
                         )
                     )
                 }
@@ -961,9 +985,9 @@ fun VouchersScreen(
                             contentAlignment = Alignment.CenterEnd
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text("Swipe to Delete", color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                                Text("Swipe to Delete", color = OnAccent, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = Color.White)
+                                Icon(Icons.Default.Delete, contentDescription = "Delete", tint = OnAccent)
                             }
                         }
                     },
@@ -998,7 +1022,7 @@ fun VouchersScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
                                             color = when (voucher.voucherType.name) {
@@ -1106,9 +1130,9 @@ fun VouchersScreen(
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                                 modifier = Modifier.height(28.dp).testTag("share_qr_btn_${voucher.id}")
                                             ) {
-                                                Icon(Icons.Default.QrCode, contentDescription = null, modifier = Modifier.size(13.dp))
+                                                Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
-                                                Text("UPI QR", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                                Text("Pay Link", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
 
                                             FilledTonalButton(
@@ -1116,7 +1140,7 @@ fun VouchersScreen(
                                                 contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                                 modifier = Modifier.height(28.dp)
                                             ) {
-                                                Icon(Icons.Default.ReceiptLong, contentDescription = null, modifier = Modifier.size(13.dp))
+                                                Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Text("Print Bill", fontSize = 10.sp, fontWeight = FontWeight.Bold)
                                             }
@@ -1167,7 +1191,7 @@ fun VouchersScreen(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = AccountingRed)
                 ) {
-                    Text("Delete", color = Color.White)
+                    Text("Delete", color = OnAccent)
                 }
             },
             dismissButton = {
@@ -1181,12 +1205,25 @@ fun VouchersScreen(
     // Camera QR Code Scanner Dialog for digital invoices
     if (showQrScannerDialog) {
         QrCodeScannerDialog(
+            realLedgers = allLedgers,
+            initialVoucherType = selectedVoucherType,
             onDismissRequest = { showQrScannerDialog = false },
             onInvoiceScanned = { scannedData ->
                 partyName = scannedData.partyName
                 amountText = scannedData.amount.toString()
-                selectedGstRate = scannedData.gstRate.toInt().toString()
+                // toInt() destroyed the 0.25% slab (gold, rough diamonds) and 2.5%,
+                // turning a taxed supply into a nil-rated one on the chip list at :606.
+                selectedGstRate = scannedData.gstRate.let {
+                    if (it % 1.0 == 0.0) it.toInt().toString() else it.toString()
+                }
                 isInterstate = scannedData.isInterstate
+                // ScannedInvoiceData.amount is the GST-INCLUSIVE total — it is what the
+                // user typed as "Invoice Amount", and what an extracted invoice's Total
+                // Amount column carries. The wizard defaults to Exclusive, so without this
+                // the amount is grossed up a SECOND time by toGrossAmount: an Rs 11,800
+                // invoice posts as Rs 13,924. The other two call sites avoid it only by
+                // accident, because addVoucher's own default is inclusive.
+                isGstInclusive = true
                 if (scannedData.narration.isNotBlank()) {
                     narration = scannedData.narration
                 }
@@ -1208,10 +1245,15 @@ fun VouchersScreen(
         // Amount is formatted on its own (Locale.US so the separator stays a dot). Calling
         // .format() on the whole URL crashed with UnknownFormatConversionException, because
         // the URL's literal "%20" escapes parse as format specifiers.
-        val upiPayment: Pair<String, String>? = user.phoneNumber.trim()
+        // Gated on a UPI ID the user actually entered. It used to be built as
+        // "<their mobile number>@upi" — "@upi" is a live NPCI handle, so that address is
+        // syntactically valid and may well resolve, to whoever registered that number on
+        // BHIM. The share LINK is the dangerous half: unlike the undecodable QR beside it,
+        // a tapped upi:// link really does open the customer's payment app pre-filled, so
+        // it could move money to an account this business does not own.
+        val upiPayment: Pair<String, String>? = user.upiId.trim()
             .takeIf { it.isNotBlank() }
-            ?.let { phone ->
-                val payeeVpa = "$phone@upi"
+            ?.let { payeeVpa ->
                 val amountText = String.format(java.util.Locale.US, "%.2f", voucher.totalAmount)
                 val url = "upi://pay?pa=$payeeVpa&pn=${user.businessName.replace(" ", "%20")}" +
                     "&am=$amountText&cu=INR&tn=Invoice%20${voucher.voucherNo.replace(" ", "%20")}"
@@ -1221,7 +1263,7 @@ fun VouchersScreen(
         AlertDialog(
             onDismissRequest = { qrVoucher = null },
             title = {
-                Text("Share UPI QR Code", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = RoyalPurplePrimary)
+                Text("Share Payment Link", fontWeight = FontWeight.Bold, fontSize = 18.sp, color = RoyalPurplePrimary)
             },
             text = {
                 Column(
@@ -1237,18 +1279,29 @@ fun VouchersScreen(
                             color = MaterialTheme.colorScheme.onSurface
                         )
                         Text(
-                            text = "Your profile has no mobile number, so there is no UPI ID to collect this payment into. Set it under Settings › Update Profile.",
+                            text = "No UPI ID is saved for this business, so there is nothing to " +
+                                "collect this payment into. Add one under Settings \u203a Update Profile.",
                             fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     } else {
                         val (payeeVpa, upiUrl) = upiPayment
-                        com.example.utils.UpiQrCodeView(
-                            vpa = payeeVpa,
-                            payeeName = user.businessName,
-                            amount = voucher.totalAmount,
-                            invoiceNo = voucher.voucherNo,
-                            size = 200.dp
+                        // The QR image that stood here was not a QR code: its data modules
+                        // were a hash-derived bit pattern with no error correction and no
+                        // format information, so scanners located the symbol and then failed
+                        // to decode it. The UPI ID below is typed into any payment app and
+                        // works; the Share button hands over a genuine upi:// link.
+                        Text("UPI ID", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(payeeVpa, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
+                        Text(
+                            "Amount: ${IndianFormatter.formatRupee(voucher.totalAmount)}",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            "Pay from any UPI app \u2014 BHIM, GPay, PhonePe, Paytm",
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text("Customer: ${voucher.partyName}", fontSize = 13.sp, fontWeight = FontWeight.Bold)
                         Button(
@@ -1428,7 +1481,7 @@ fun VouchersScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.SpaceBetween
                                 ) {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.weight(1f)) {
                                         Icon(Icons.Default.Star, contentDescription = null, tint = RoyalPurplePrimary)
                                         Spacer(modifier = Modifier.width(12.dp))
                                         Text(favName, fontWeight = FontWeight.Bold, fontSize = 14.sp)
@@ -1464,7 +1517,8 @@ fun VouchersScreen(
 
     // Interactive GST Calculator Tool Dialog
     if (showGstCalculatorTool) {
-        GstCalculatorModal(
+        VoucherFormGstCalculator(
+            isInterstate = isInterstate,
             initialAmount = amountText,
             initialRate = selectedGstRate,
             initialInclusive = isGstInclusive,
@@ -1492,7 +1546,10 @@ fun VouchersScreen(
 }
 
 @Composable
-fun GstCalculatorModal(
+private fun VoucherFormGstCalculator(
+    /** The form's own place of supply. Without it the preview showed CGST+SGST on every
+     *  interstate sale while the voucher posted IGST. */
+    isInterstate: Boolean,
     initialAmount: String,
     initialRate: String,
     initialInclusive: Boolean,
@@ -1511,10 +1568,11 @@ fun GstCalculatorModal(
     } else {
         amount
     }
-    val taxAmt = if (calcIsInclusive) amount - taxable else amount * (rate / 100.0)
-    val totalVal = if (calcIsInclusive) amount else amount + taxAmt
-    val cgstVal = taxAmt / 2.0
-    val sgstVal = taxAmt / 2.0
+    val taxAmt = Money.paise(if (calcIsInclusive) amount - taxable else amount * (rate / 100.0))
+    val totalVal = Money.paise(if (calcIsInclusive) amount else amount + taxAmt)
+    // Independently-rounded halves need not sum to the tax shown above them. This shares
+    // the posting engine's split so the preview matches what the voucher will post.
+    val (cgstVal, sgstVal, igstVal) = GstCalculationService.splitHeads(taxAmt, isInterstate)
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1532,21 +1590,17 @@ fun GstCalculatorModal(
                     modifier = Modifier.fillMaxWidth()
                 )
 
-                Text("GST Tax Mode:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    FilterChip(
+                Text("GST tax mode", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
+                    ChoiceChip(
+                        label = "Add GST",
                         selected = !calcIsInclusive,
-                        onClick = { calcIsInclusive = false },
-                        label = { Text("Exclusive (+ Tax)") },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White),
-                        modifier = Modifier.weight(1f)
+                        onClick = { calcIsInclusive = false }
                     )
-                    FilterChip(
+                    ChoiceChip(
+                        label = "Extract GST",
                         selected = calcIsInclusive,
-                        onClick = { calcIsInclusive = true },
-                        label = { Text("Inclusive (Incl. Tax)") },
-                        colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White),
-                        modifier = Modifier.weight(1f)
+                        onClick = { calcIsInclusive = true }
                     )
                 }
 
@@ -1560,7 +1614,7 @@ fun GstCalculatorModal(
                             selected = calcGstRate == r,
                             onClick = { calcGstRate = r },
                             label = { Text("$r%", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = Color.White)
+                            colors = FilterChipDefaults.filterChipColors(selectedContainerColor = RoyalPurplePrimary, selectedLabelColor = OnAccent)
                         )
                     }
                 }
@@ -1572,8 +1626,14 @@ fun GstCalculatorModal(
                 ) {
                     Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         MonetaryRow(label = "Taxable Base Value", amount = taxable)
-                        MonetaryRow(label = "CGST (${rate / 2}%)", amount = cgstVal)
-                        MonetaryRow(label = "SGST (${rate / 2}%)", amount = sgstVal)
+                        // Was CGST+SGST unconditionally, so an inter-state entry previewed
+                        // a split the voucher would never post.
+                        if (isInterstate) {
+                            MonetaryRow(label = "IGST ($rate%)", amount = igstVal)
+                        } else {
+                            MonetaryRow(label = "CGST (${rate / 2}%)", amount = cgstVal)
+                            MonetaryRow(label = "SGST (${rate / 2}%)", amount = sgstVal)
+                        }
                         MonetaryRow(label = "Total Tax Amount", amount = taxAmt, amountColor = RoyalPurplePrimary)
                         Divider(modifier = Modifier.padding(vertical = 4.dp))
                         MonetaryRow(label = "Total Invoice Value", amount = totalVal, amountColor = RoyalPurplePrimary)

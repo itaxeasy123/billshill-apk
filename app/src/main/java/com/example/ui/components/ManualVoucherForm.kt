@@ -108,18 +108,18 @@ fun ManualVoucherDialog(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Voucher Type Selector
+                // Voucher Type Selector. Four equal weights on a 360dp phone gave each
+                // chip ~78dp, so "Journal" broke as "Journ / al" and "Contra (Cash/Bank)"
+                // stacked four lines deep and set the height of the whole row.
                 Text("Voucher Type:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
+                ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp) {
                     listOf(VoucherType.JOURNAL, VoucherType.PAYMENT, VoucherType.RECEIPT, VoucherType.CONTRA).forEach { type ->
-                        FilterChip(
+                        ChoiceChip(
+                            label = type.displayName,
                             selected = voucherType == type,
                             onClick = { voucherType = type },
-                            label = { Text(type.displayName, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            modifier = Modifier.weight(1f)
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }

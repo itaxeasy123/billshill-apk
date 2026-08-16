@@ -94,6 +94,24 @@ data class UserEntity(
     // Blank, not "ACTIVE": the app has no way to verify GST registration status, and a
     // green ACTIVE badge asserting it is a claim the app cannot support.
     val gstStatus: String = "",
+    /**
+     * The business's own UPI ID, e.g. "shop@okhdfcbank".
+     *
+     * Nothing recorded one, so the invoice and the payment link both built a payee as
+     * "<mobile number>@upi" — an address the business has never asserted it owns, on a
+     * live NPCI handle, printed under "SCAN TO PAY". Blank by default: no payment
+     * details are shown until the user supplies a real one.
+     */
+    val upiId: String = "",
+    /**
+     * Aggregate turnover of the PRECEDING financial year — GSTR-1's `gt`.
+     *
+     * User-declared, not derived: s.2(6) aggregate turnover is a PAN-level, all-India
+     * figure spanning every GSTIN under the same PAN and including exempt, nil-rated,
+     * non-GST and export supplies, none of which this single-GSTIN book distinguishes.
+     * -1.0 means "not declared", which is deliberately distinguishable from a genuine 0.0.
+     */
+    val previousFyAggregateTurnover: Double = -1.0,
     val constitutionOfBusiness: String = "",
     /**
      * GST filing scheme. QRMP (Quarterly Return, Monthly Payment) is available to

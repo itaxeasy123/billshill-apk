@@ -53,8 +53,12 @@ object GstCalculationService {
                 isInterstate = true
             )
         } else {
+            // This file is a second GST engine that rounded nothing. Rather than leave a
+            // divergent convention in the tree for someone to wire up, the split now
+            // delegates to the canonical one in utils.GstCalculationService.
             val halfRate = gstRate / 2.0
-            val halfTax = gstTaxTotal / 2.0
+            val (cgstAmt, sgstAmt, _) =
+                com.example.utils.GstCalculationService.splitHeads(gstTaxTotal, false)
             GstCalculationResult(
                 grossAmount = grossAmount,
                 taxableValue = taxableBase,
@@ -62,8 +66,8 @@ object GstCalculationService {
                 cgstRate = halfRate,
                 sgstRate = halfRate,
                 igstRate = 0.0,
-                cgstAmount = halfTax,
-                sgstAmount = halfTax,
+                cgstAmount = cgstAmt,
+                sgstAmount = sgstAmt,
                 igstAmount = 0.0,
                 isInterstate = false
             )

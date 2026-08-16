@@ -19,7 +19,6 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.asAndroidPath
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -31,6 +30,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.ui.theme.ElectricPurple
 import com.example.ui.theme.LavenderContainer
+import com.example.ui.theme.MutedTextSoft
+import com.example.ui.theme.PaperSurface
+import com.example.ui.theme.SignatureInk
 import java.io.File
 import java.io.FileOutputStream
 
@@ -92,7 +94,7 @@ fun SignaturePadDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(180.dp)
-                        .background(Color.White, RoundedCornerShape(16.dp))
+                        .background(PaperSurface, RoundedCornerShape(16.dp))
                         .border(1.5.dp, ElectricPurple.copy(alpha = 0.4f), RoundedCornerShape(16.dp))
                         .pointerInput(Unit) {
                             detectDragGestures(
@@ -119,7 +121,7 @@ fun SignaturePadDialog(
                         paths.forEach { path ->
                             drawPath(
                                 path = path,
-                                color = androidx.compose.ui.graphics.Color(0xFF1B1B2F),
+                                color = SignatureInk,
                                 style = Stroke(width = 4.dp.toPx())
                             )
                         }
@@ -128,7 +130,7 @@ fun SignaturePadDialog(
                     if (paths.isEmpty()) {
                         Text(
                             text = "Sign Here inside box...",
-                            color = Color.LightGray,
+                            color = MutedTextSoft,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.align(Alignment.Center)
@@ -144,7 +146,7 @@ fun SignaturePadDialog(
                             .padding(bottom = 30.dp, start = 20.dp, end = 20.dp)
                     ) {
                         drawLine(
-                            color = Color.LightGray,
+                            color = MutedTextSoft,
                             start = Offset(0f, 0f),
                             end = Offset(size.width, 0f),
                             strokeWidth = 1.dp.toPx()

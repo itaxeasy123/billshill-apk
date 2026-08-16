@@ -19,7 +19,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -222,7 +221,7 @@ fun TrialBalanceReportModal(
                                         Icon(
                                             imageVector = if (isBalanced) Icons.Default.CheckCircle else Icons.Default.Warning,
                                             contentDescription = null,
-                                            tint = Color.White,
+                                            tint = OnAccent,
                                             modifier = Modifier.size(20.dp)
                                         )
                                     }
@@ -341,7 +340,7 @@ fun TrialBalanceReportModal(
                                         label = { Text(label, fontSize = 11.sp) },
                                         colors = FilterChipDefaults.filterChipColors(
                                             selectedContainerColor = RoyalPurplePrimary,
-                                            selectedLabelColor = Color.White
+                                            selectedLabelColor = OnAccent
                                         )
                                     )
                                 }
@@ -362,9 +361,9 @@ fun TrialBalanceReportModal(
                                     .fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Ledger Account & Group", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, modifier = Modifier.weight(1.5f))
-                                Text("Debit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
-                                Text("Credit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                                Text("Ledger Account & Group", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, modifier = Modifier.weight(1.5f))
+                                Text("Debit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                                Text("Credit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
                             }
                         }
                     }

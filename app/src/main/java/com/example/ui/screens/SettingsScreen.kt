@@ -13,7 +13,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -26,6 +25,8 @@ import com.example.ui.AccountingViewModel
 import com.example.ui.theme.*
 import com.example.utils.PostalPincodeService
 import kotlinx.coroutines.launch
+import com.example.ui.components.ChoiceChip
+import com.example.ui.components.ChoiceChipRow
 
 @Composable
 fun SettingsScreen(
@@ -159,7 +160,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(text = "GSTIN TAX REGISTRATION", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(text = user.gstin, fontSize = 15.sp, fontWeight = FontWeight.Bold, color = RoyalPurplePrimary)
                         }
@@ -258,7 +259,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (user.enableInventory) "Inventory" else "No Inventory",
                                 fontSize = 16.sp,
@@ -289,9 +290,9 @@ fun SettingsScreen(
                             colors = ButtonDefaults.buttonColors(containerColor = DeepPurpleSecondary),
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
+                            Icon(Icons.Default.Add, contentDescription = null, tint = OnAccent)
                             Spacer(modifier = Modifier.width(6.dp))
-                            Text("Create New Stock Item", color = Color.White, fontWeight = FontWeight.Bold)
+                            Text("Create New Stock Item", color = OnAccent, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -323,10 +324,7 @@ fun SettingsScreen(
                     )
                     Spacer(modifier = Modifier.height(14.dp))
 
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
                         ThemeMode.values().forEach { mode ->
                             val isSelected = currentThemeMode == mode
                             FilterChip(
@@ -354,11 +352,10 @@ fun SettingsScreen(
                                         modifier = Modifier.size(16.dp)
                                     )
                                 },
-                                modifier = Modifier.weight(1f),
                                 colors = FilterChipDefaults.filterChipColors(
                                     selectedContainerColor = RoyalPurplePrimary,
-                                    selectedLabelColor = Color.White,
-                                    selectedLeadingIconColor = Color.White
+                                    selectedLabelColor = OnAccent,
+                                    selectedLeadingIconColor = OnAccent
                                 )
                             )
                         }
@@ -452,7 +449,7 @@ fun SettingsScreen(
                                                 label = { Text(lName, fontSize = 11.sp) },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     selectedContainerColor = RoyalPurplePrimary,
-                                                    selectedLabelColor = Color.White
+                                                    selectedLabelColor = OnAccent
                                                 )
                                             )
                                         }
@@ -614,7 +611,7 @@ fun SettingsScreen(
                     text = {
                         Card(
                             shape = RoundedCornerShape(12.dp),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E1E28)),
+                            colors = CardDefaults.cardColors(containerColor = ConsolePanel),
                             modifier = Modifier.fillMaxWidth().height(280.dp)
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
@@ -622,7 +619,7 @@ fun SettingsScreen(
                                     text = showJsonModalText!!,
                                     fontSize = 10.sp,
                                     fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                                    color = Color(0xFF00FF88),
+                                    color = ConsoleAccent,
                                     modifier = Modifier.verticalScroll(rememberScrollState())
                                 )
                             }
@@ -838,7 +835,7 @@ fun SettingsScreen(
                             modifier = Modifier.weight(1f)
                         ) {
                             if (isSyncing) {
-                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = Color.White, strokeWidth = 2.dp)
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), color = OnAccent, strokeWidth = 2.dp)
                                 Spacer(modifier = Modifier.width(6.dp))
                             } else {
                                 Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp))
@@ -905,7 +902,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = if (unresolvedDiscrepancyCount > 0) "$unresolvedDiscrepancyCount discrepancy flag(s) active" else "Ledgers cleanly reconciled",
                                 fontSize = 13.sp,
@@ -949,7 +946,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = "AUTOMATIC ON-DEVICE BACKUP",
                                 fontSize = 11.sp,
@@ -977,20 +974,17 @@ fun SettingsScreen(
                     // and every filer was shown the monthly 11th/20th.
                     Text("GST Filing Scheme:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
                         listOf(
                             "MONTHLY" to "Monthly",
                             "QRMP" to "QRMP (quarterly)"
                         ).forEach { (scheme, label) ->
-                            FilterChip(
+                            ChoiceChip(
+                                label = label,
                                 selected = (user.filingScheme.ifBlank { "MONTHLY" }) == scheme,
                                 onClick = { viewModel.setFilingScheme(scheme) },
-                                label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = RoyalPurplePrimary,
-                                    selectedLabelColor = Color.White
-                                ),
-                                modifier = Modifier.weight(1f)
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -1004,20 +998,14 @@ fun SettingsScreen(
 
                     Text("Backup Interval:", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                     Spacer(modifier = Modifier.height(6.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
                         listOf("DAILY" to "Daily", "WEEKLY" to "Weekly", "MONTHLY" to "Monthly").forEach { (freqKey, label) ->
-                            FilterChip(
+                            ChoiceChip(
+                                label = label,
                                 selected = backupFrequency == freqKey,
                                 onClick = { viewModel.setCloudBackupSettings(context, autoCloudBackup, freqKey) },
-                                label = { Text(label, fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = RoyalPurplePrimary,
-                                    selectedLabelColor = Color.White
-                                ),
-                                modifier = Modifier.weight(1f)
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
                     }
@@ -1031,7 +1019,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("Last Backup Status:", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(lastBackupTime, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = AccountingGreen)
                         }
@@ -1138,9 +1126,9 @@ fun SettingsScreen(
                     .height(52.dp)
                     .testTag("single_click_logout_button")
             ) {
-                Icon(Icons.Default.ExitToApp, contentDescription = null, tint = Color.White)
+                Icon(Icons.Default.ExitToApp, contentDescription = null, tint = OnAccent)
                 Spacer(modifier = Modifier.width(8.dp))
-                Text("Logout Account", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Logout Account", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = OnAccent)
             }
         }
     }
@@ -1419,6 +1407,13 @@ fun EditProfileDialog(
     var dod by remember { mutableStateOf(currentUser.dod) }
     var phone by remember { mutableStateOf(currentUser.phoneNumber) }
     var email by remember { mutableStateOf(currentUser.email) }
+    var upiId by remember { mutableStateOf(currentUser.upiId) }
+    var prevFyTurnover by remember {
+        mutableStateOf(
+            if (currentUser.previousFyAggregateTurnover < 0.0) ""
+            else currentUser.previousFyAggregateTurnover.toString()
+        )
+    }
     var gstin by remember { mutableStateOf(currentUser.gstin) }
     var address by remember { mutableStateOf(currentUser.address) }
     var pincode by remember { mutableStateOf(currentUser.pincode) }
@@ -1550,6 +1545,49 @@ fun EditProfileDialog(
                     )
                 }
                 item {
+                    // GSTR-1's `gt`. The export used to fill it with the current month's taxable
+                    // value — the same number it put in cur_gt, which is how the error was visible:
+                    // two fields with different definitions carrying an identical figure. Declared
+                    // rather than derived, because s.2(6) aggregate turnover is PAN-level across
+                    // every GSTIN and includes exempt and export supplies this book cannot separate.
+                    OutlinedTextField(
+                        value = prevFyTurnover,
+                        onValueChange = { prevFyTurnover = it },
+                        label = { Text("Aggregate turnover, previous FY (₹)") },
+                        placeholder = { Text("As declared on the GST portal") },
+                        supportingText = {
+                            Text(
+                                "PAN-level, all GSTINs, including exempt and export supplies. " +
+                                    "Required before a GSTR-1 payload can be exported.",
+                                fontSize = 11.sp
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
+                    // The invoice and the payment link used to build a payee as
+                    // "<mobile>@upi" because there was nowhere to record a real one, and
+                    // the empty-state copy told users to "Add a UPI ID in Settings" —
+                    // where no such field existed. This is that field.
+                    OutlinedTextField(
+                        value = upiId,
+                        onValueChange = { upiId = it },
+                        label = { Text("UPI ID for payments (optional)") },
+                        placeholder = { Text("e.g. yourshop@okhdfcbank") },
+                        supportingText = {
+                            Text(
+                                "Shown on invoices so customers can pay you. Leave blank " +
+                                    "and no payment details are printed.",
+                                fontSize = 11.sp
+                            )
+                        },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+                item {
                     OutlinedTextField(
                         value = address,
                         onValueChange = { address = it },
@@ -1642,6 +1680,10 @@ fun EditProfileDialog(
                         ownerName = fullOwnerName,
                         phoneNumber = phone.trim(),
                         email = email.trim(),
+                        upiId = upiId.trim(),
+                        // Blank stays -1.0, i.e. "not declared" — distinguishable from a
+                        // genuine zero, which a new business may legitimately have.
+                        previousFyAggregateTurnover = prevFyTurnover.trim().toDoubleOrNull() ?: -1.0,
                         gstin = gstin.trim(),
                         address = address.trim(),
                         pincode = pincode.trim(),
@@ -1712,7 +1754,7 @@ fun GstCertificateModal(
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                        Column {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text("Constitution of Business:", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             Text(user.constitutionOfBusiness, fontSize = 11.sp, fontWeight = FontWeight.Bold)
                         }

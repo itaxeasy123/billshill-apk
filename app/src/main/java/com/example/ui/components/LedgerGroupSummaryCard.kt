@@ -19,6 +19,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.dao.FundsGroups
 import com.example.data.dao.LedgerWithBalance
 import com.example.data.model.LedgerCategory
 import com.example.ui.theme.*
@@ -32,16 +33,14 @@ fun LedgerGroupSummaryCard(
     var selectedSectionTab by remember { mutableStateOf(0) }
     val sectionTabs = listOf("Group Balances", "Cash", "Bank", "Customers & Suppliers")
 
-    // Filter cash ledgers
-    val cashLedgers = trialBalance.filter { 
-        it.groupName.contains("Cash", ignoreCase = true) || it.name.contains("Cash", ignoreCase = true)
-    }
+    // Membership is the ledger's GROUP, never its name — matching the name counted a
+    // customer called "HDFC Bank Ltd" as money in the bank, and any group containing both
+    // words (the app's own "Cash/Bank Accounts") landed in both buckets at once. Shares
+    // the whitelist with the DAO's IS_CASH / IS_BANK predicates.
+    val cashLedgers = trialBalance.filter { FundsGroups.isCash(it.groupName) }
     val totalCashBalance = cashLedgers.sumOf { it.currentBalance }
 
-    // Filter bank ledgers
-    val bankLedgers = trialBalance.filter { 
-        it.groupName.contains("Bank", ignoreCase = true) || it.name.contains("Bank", ignoreCase = true)
-    }
+    val bankLedgers = trialBalance.filter { FundsGroups.isBank(it.groupName) }
     val totalBankBalance = bankLedgers.sumOf { it.currentBalance }
 
     // Filter Party ledgers (Sundry Debtors & Sundry Creditors)
@@ -72,7 +71,7 @@ fun LedgerGroupSummaryCard(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = "LEDGER GROUP CLOSING BALANCES",
                         fontSize = 11.sp,
@@ -186,7 +185,7 @@ fun LedgerGroupSummaryCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, tint = AccountingGreen)
                                 Column {
                                     Text("Cash Accounts Total", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -245,7 +244,7 @@ fun LedgerGroupSummaryCard(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f)) {
                                 Icon(Icons.Default.AccountBalance, contentDescription = null, tint = DeepPurpleSecondary)
                                 Column {
                                     Text("Bank Accounts Total", fontSize = 12.sp, fontWeight = FontWeight.Bold)
@@ -358,7 +357,7 @@ fun LedgerGroupSummaryCard(
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Column {
+                                        Column(modifier = Modifier.weight(1f)) {
                                             Text(party.name, fontSize = 12.sp, fontWeight = FontWeight.Bold)
                                             Text(party.groupName, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }

@@ -1,5 +1,6 @@
 package com.example.ui.components
 
+import com.example.utils.Money
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -17,7 +18,6 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -58,12 +58,14 @@ fun GstCalculatorModal(
     val breakdown = remember(inputAmount, effectiveRate, isExclusiveMode, isInterstate) {
         if (isExclusiveMode) {
             // Exclusive: input is Taxable Base Amount. Total = Base + GST
-            val taxable = inputAmount
-            val gstAmount = (taxable * effectiveRate) / 100.0
-            val total = taxable + gstAmount
-            val cgstAmt = if (isInterstate) 0.0 else gstAmount / 2.0
-            val sgstAmt = if (isInterstate) 0.0 else gstAmount / 2.0
-            val igstAmt = if (isInterstate) gstAmount else 0.0
+            // The exclusive branch quantised nothing: the total itself carried binary
+            // noise before it was halved, and the halves were then rounded independently
+            // so they need not add back to it. Same convention as the posting engine.
+            val taxable = Money.paise(inputAmount)
+            val gstAmount = Money.paise((taxable * effectiveRate) / 100.0)
+            val total = Money.paise(taxable + gstAmount)
+            val (cgstAmt, sgstAmt, igstAmt) =
+                GstCalculationService.splitHeads(gstAmount, isInterstate)
             val cgstRate = if (isInterstate) 0.0 else effectiveRate / 2.0
             val sgstRate = if (isInterstate) 0.0 else effectiveRate / 2.0
             val igstRate = if (isInterstate) effectiveRate else 0.0
@@ -117,7 +119,12 @@ fun GstCalculatorModal(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    // weight(1f) so the title yields to the close button rather than
+                    // claiming the full width and pushing it off the edge.
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.weight(1f)
+                    ) {
                         Surface(
                             shape = CircleShape,
                             color = RoyalPurplePrimary.copy(alpha = 0.12f),
@@ -135,14 +142,14 @@ fun GstCalculatorModal(
                         Spacer(modifier = Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "GST TAX CALCULATOR",
+                                text = "GST CALCULATOR",
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = RoyalPurplePrimary,
                                 letterSpacing = 0.8.sp
                             )
                             Text(
-                                text = "Instant CGST, SGST & IGST breakdown tool",
+                                text = "CGST, SGST and IGST breakdown",
                                 fontSize = 11.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -196,84 +203,67 @@ fun GstCalculatorModal(
                     )
 
                     // 2. Calculation Mode Toggle (Exclusive vs Inclusive)
-                    Text("Calculation Type:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        FilterChip(
+                    Text("Calculation type", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
+                        ChoiceChip(
+                            label = "Add GST",
                             selected = isExclusiveMode,
                             onClick = { isExclusiveMode = true },
-                            label = {
-                                Text(
-                                    "Exclusive (+ GST)",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
                             leadingIcon = {
                                 if (isExclusiveMode) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                             },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = RoyalPurplePrimary,
-                                selectedLabelColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1f).testTag("gst_calc_exclusive_chip")
+                            testTag = "gst_calc_exclusive_chip"
                         )
 
-                        FilterChip(
+                        ChoiceChip(
+                            label = "Extract GST",
                             selected = !isExclusiveMode,
                             onClick = { isExclusiveMode = false },
-                            label = {
-                                Text(
-                                    "Inclusive (Extract GST)",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            selectedContainerColor = DeepPurpleSecondary,
                             leadingIcon = {
                                 if (!isExclusiveMode) Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp))
                             },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = DeepPurpleSecondary,
-                                selectedLabelColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1f).testTag("gst_calc_inclusive_chip")
+                            testTag = "gst_calc_inclusive_chip"
                         )
                     }
 
-                    // 3. Tax Rate Slabs Selection (5%, 12%, 18%, 28%, Custom)
-                    Text("GST Rate Slab:", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        listOf(0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { slab ->
-                            val isSelected = !isCustomSelected && selectedSlab == slab
-                            FilterChip(
-                                selected = isSelected,
+                    // 3. Tax Rate Slabs Selection
+                    //
+                    // Nine chips at Modifier.weight(1f) is 33dp each on a 360dp phone —
+                    // under the minimum touch target before padding — so every label
+                    // measured to zero width and the user picked a tax rate from eight
+                    // identical blank pills. A rate chip is as wide as "0.25%".
+                    Text("GST rate", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurface)
+                    ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp) {
+                        // 0.0 was missing and 0.25 rendered as "0" via toInt(), so the
+                        // first chip read 0% and applied a quarter percent — and exempt or
+                        // nil-rated supplies had no chip at all, only "Custom". On a
+                        // Rs 50,00,000 exempt supply that is Rs 12,500 of tax charged on
+                        // something that carries none.
+                        listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { slab ->
+                            ChoiceChip(
+                                label = if (slab % 1.0 == 0.0) "${slab.toInt()}%" else "$slab%",
+                                selected = !isCustomSelected && selectedSlab == slab,
                                 onClick = {
                                     selectedSlab = slab
                                     isCustomSelected = false
                                 },
-                                label = { Text("${slab.toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = RoyalPurplePrimary,
-                                    selectedLabelColor = Color.White
-                                ),
-                                modifier = Modifier.weight(1f)
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
                             )
                         }
 
-                        FilterChip(
+                        ChoiceChip(
+                            label = "Custom",
                             selected = isCustomSelected,
                             onClick = { isCustomSelected = true },
-                            label = { Text("Custom", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = AmberGold,
-                                selectedLabelColor = Color.White
-                            ),
-                            modifier = Modifier.weight(1.1f)
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            selectedContainerColor = AmberGold
                         )
                     }
 
@@ -348,7 +338,7 @@ fun GstCalculatorModal(
                                         text = "${formatDecimal(effectiveRate)}% GST",
                                         fontSize = 10.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White,
+                                        color = OnAccent,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
                                     )
                                 }
@@ -449,7 +439,62 @@ fun GstCalculatorModal(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // Pinned answer.
+                //
+                // The full breakdown card is the last thing in the scrolling region, so on
+                // a 360x800 phone the calculator opened with its own result below the fold:
+                // enter an amount, pick a rate, and then scroll to find out what it came
+                // to. The two figures a user actually came for now sit above the buttons
+                // and never move; the per-head split stays in the card above.
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = RoyalPurplePrimary,
+                    modifier = Modifier.fillMaxWidth().testTag("gst_calc_pinned_total")
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "GST at ${formatDecimal(effectiveRate)}%",
+                                fontSize = 10.sp,
+                                color = OnAccent.copy(alpha = 0.75f),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = IndianFormatter.formatRupee(breakdown.totalGstAmount),
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OnAccent,
+                                maxLines = 1
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(
+                                text = "Total",
+                                fontSize = 10.sp,
+                                color = OnAccent.copy(alpha = 0.75f),
+                                maxLines = 1
+                            )
+                            Text(
+                                text = IndianFormatter.formatRupee(breakdown.grossAmount),
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = OnAccent,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(10.dp))
 
                 // Action Buttons
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {

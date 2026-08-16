@@ -77,16 +77,21 @@ fun GstItemInputField(
                 color = MaterialTheme.colorScheme.onSurface
             )
 
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
-            ) {
+            // Eight chips sharing the width equally left each one too narrow to render
+            // its own label, so the slab picker was a row of blank pills. They now take
+            // the width "0.25%" needs and wrap.
+            //
+            // The label also read `slab.toInt()`, which prints 0.25 as "0" — two chips
+            // both said "0%" and the second one charged a quarter percent. Same defect
+            // the GST calculator carried, same fix.
+            ChoiceChipRow(modifier = Modifier.fillMaxWidth(), horizontalSpacing = 6.dp) {
                 listOf(0.0, 0.25, 3.0, 5.0, 12.0, 18.0, 28.0, 40.0).forEach { slab ->
-                    FilterChip(
-                        selected = Math.abs(gstRate - slab) < 0.1,
+                    ChoiceChip(
+                        label = if (slab % 1.0 == 0.0) "${slab.toInt()}%" else "$slab%",
+                        selected = Math.abs(gstRate - slab) < 0.01,
                         onClick = { onGstRateChange(slab) },
-                        label = { Text("${slab.toInt()}%", fontSize = 11.sp, fontWeight = FontWeight.Bold) },
-                        modifier = Modifier.weight(1f)
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -97,7 +102,7 @@ fun GstItemInputField(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = if (isInterstate) "Inter-State (IGST Applicable)" else "Intra-State (CGST + SGST)",
                         fontSize = 13.sp,
