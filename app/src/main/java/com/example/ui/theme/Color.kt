@@ -130,6 +130,23 @@ val InvoiceTaxWash = Color(0xFFFAF9FD)
 val InvoiceTotalWash = Color(0xFFEADDFF)
 val InvoiceTotalInk = Color(0xFF21005D)
 
+// The shared invoice template's neutrals. These are deliberately achromatic: the accent
+// is chosen by the user at runtime, so every tinted surface on the document derives from
+// that colour instead and only the greys can be named here. The four values match the
+// PDF renderer's greys exactly, which is what keeps the on-screen preview and the printed
+// page looking like the same document.
+/** Banding on alternate item rows. */
+val InvoiceRowStripe = Color(0xFFF6F7FA)
+
+/** Hairline under an item row. */
+val InvoiceRule = Color(0xFFDEE0E6)
+
+/** Secondary label ink — field captions, party detail lines. */
+val InvoiceInkMuted = Color(0xFF5A5A60)
+
+/** Primary ink for values and item text. */
+val InvoiceInkStrong = Color(0xFF1C1C20)
+
 // ═══════════════════════════════════════════════════════════════════════════════
 //  CHARTS — a categorical sequence. Order matters; slices are assigned by index.
 // ═══════════════════════════════════════════════════════════════════════════════

@@ -44,7 +44,6 @@ import com.example.data.model.VoucherType
 import com.example.ui.AccountingViewModel
 import com.example.ui.components.ManualVoucherDialog
 import com.example.ui.components.MonetaryRow
-import com.example.ui.components.SalesInvoiceDialog
 import com.example.ui.components.QrCodeScannerDialog
 import com.example.ui.components.ScannedInvoiceData
 import com.example.ui.theme.*
@@ -59,7 +58,7 @@ import kotlinx.coroutines.launch
 import com.example.utils.CsvExporter
 import com.example.utils.GstCalculationService
 import com.example.utils.IndianFormatter
-import com.example.utils.PdfInvoiceGenerator
+import com.example.invoice.VoucherInvoiceDialog
 import java.util.Calendar
 import com.example.ui.components.ChoiceChip
 import com.example.ui.components.ChoiceChipRow
@@ -1138,18 +1137,26 @@ fun VouchersScreen(
                                     )
 
                                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        // Opens the shared invoice surface rather than
+                                        // firing a share sheet straight off the tap: the
+                                        // document is previewed and can be restyled before
+                                        // it goes out. This used to be the only export for
+                                        // non-SALES types and it printed them all under
+                                        // one generic heading.
                                         FilledTonalButton(
-                                            onClick = {
-                                                PdfInvoiceGenerator.generateAndSharePdf(context, voucher, user)
-                                            },
+                                            onClick = { invoiceVoucher = voucher },
                                             contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                            modifier = Modifier.height(28.dp)
+                                            modifier = Modifier.height(28.dp).testTag("invoice_btn_${voucher.id}")
                                         ) {
                                             Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(13.dp))
                                             Spacer(modifier = Modifier.width(4.dp))
-                                            Text("PDF", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                            Text("Invoice", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                         }
 
+                                        // "Print Bill" used to sit here as a SALES-only
+                                        // second route to a richer preview. Both routes now
+                                        // reach the same document, so it was two buttons
+                                        // for one action.
                                         if (voucher.voucherType == VoucherType.SALES) {
                                             FilledTonalButton(
                                                 onClick = { qrVoucher = voucher },
@@ -1159,16 +1166,6 @@ fun VouchersScreen(
                                                 Icon(Icons.Default.Link, contentDescription = null, modifier = Modifier.size(13.dp))
                                                 Spacer(modifier = Modifier.width(4.dp))
                                                 Text("Pay Link", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                                            }
-
-                                            FilledTonalButton(
-                                                onClick = { invoiceVoucher = voucher },
-                                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                                modifier = Modifier.height(28.dp)
-                                            ) {
-                                                Icon(Icons.AutoMirrored.Filled.ReceiptLong, contentDescription = null, modifier = Modifier.size(13.dp))
-                                                Spacer(modifier = Modifier.width(4.dp))
-                                                Text("Print Bill", fontSize = 10.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                                             }
                                         }
 
@@ -1359,9 +1356,9 @@ fun VouchersScreen(
         )
     }
 
-    // Print Sales Invoice Dialog
+    // The shared invoice surface — preview, restyle, then PDF / print / text.
     invoiceVoucher?.let { voucher ->
-        SalesInvoiceDialog(
+        VoucherInvoiceDialog(
             voucher = voucher,
             user = user,
             onDismiss = { invoiceVoucher = null }

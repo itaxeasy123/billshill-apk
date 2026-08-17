@@ -35,6 +35,7 @@ import com.example.data.model.VoucherEntity
 import com.example.data.gst.GstClassifier
 import com.example.data.gst.SupplyCategory
 import com.example.data.model.VoucherType
+import com.example.invoice.VoucherInvoiceDialog
 import com.example.ui.AccountingViewModel
 import com.example.ui.components.AnalyticsSummaryChartCard
 import com.example.ui.components.CashBankTrendChartCard
@@ -78,6 +79,9 @@ fun ReportsScreen(
     var selectedLedgerForStatement by remember { mutableStateOf<LedgerWithBalance?>(null) }
     var ledgerTransactions by remember { mutableStateOf<List<LedgerTxEntry>>(emptyList()) }
     var editingVoucherInStatement by remember { mutableStateOf<VoucherEntity?>(null) }
+
+    /** The voucher whose document is open in the shared invoice surface, if any. */
+    var invoiceVoucher by remember { mutableStateOf<VoucherEntity?>(null) }
     var editPartyName by remember { mutableStateOf("") }
     var editAmountText by remember { mutableStateOf("") }
     var editNarration by remember { mutableStateOf("") }
@@ -1578,7 +1582,7 @@ fun ReportsScreen(
                 ) {
                     Button(
                         onClick = {
-                            PdfInvoiceGenerator.generateAndShareLedgerPdf(
+                            LedgerStatementPdf.generateAndShareLedgerPdf(
                                 context = context,
                                 ledgerName = selectedLedgerForStatement?.name ?: "Ledger Account",
                                 ledgerId = selectedLedgerForStatement?.id ?: 0L,
@@ -1604,6 +1608,16 @@ fun ReportsScreen(
     }
 
     // Voucher Management Modal in Statement
+    // The same invoice surface the daybook opens, so a document reached from a statement
+    // is identical to the one reached from the voucher list.
+    invoiceVoucher?.let { voucher ->
+        VoucherInvoiceDialog(
+            voucher = voucher,
+            user = user,
+            onDismiss = { invoiceVoucher = null }
+        )
+    }
+
     editingVoucherInStatement?.let { voucher ->
         AlertDialog(
             onDismissRequest = { editingVoucherInStatement = null },
@@ -1646,13 +1660,11 @@ fun ReportsScreen(
             confirmButton = {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     FilledTonalButton(
-                        onClick = {
-                            PdfInvoiceGenerator.generateAndSharePdf(context, voucher, user)
-                        }
+                        onClick = { invoiceVoucher = voucher }
                     ) {
                         Icon(Icons.Default.PictureAsPdf, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(4.dp))
-                        Text("PDF", maxLines = 1, softWrap = false)
+                        Text("Invoice", maxLines = 1, softWrap = false)
                     }
                     Button(
                         onClick = {

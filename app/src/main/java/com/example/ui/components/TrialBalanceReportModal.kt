@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -46,8 +47,20 @@ fun TrialBalanceReportModal(
     var selectedCategoryFilter by remember { mutableStateOf("ALL") }
     var searchQuery by remember { mutableStateOf("") }
 
+    /** Full timestamp — goes into the copied statement and the CSV, where width is free. */
     val currentDateStr = remember {
         SimpleDateFormat("dd MMMM yyyy, hh:mm a", Locale.getDefault()).format(Date())
+    }
+
+    /**
+     * Short form for the title bar.
+     *
+     * A TopAppBar's title area is one fixed-height row: the long timestamp pushed the
+     * subtitle onto a second line, which the bar has no room for, so "2026 05:06 PM" was
+     * drawn underneath the content below it and read as a rendering glitch.
+     */
+    val headerDateStr = remember {
+        SimpleDateFormat("dd MMM yyyy", Locale.getDefault()).format(Date())
     }
 
     val totalDebit = trialBalance.sumOf { it.totalDebit }
@@ -70,6 +83,8 @@ fun TrialBalanceReportModal(
         matchesSearch && matchesCategory
     }
 
+    val insets = dialogSystemBarInsets()
+
     val filteredDebitSum = filteredList.sumOf { it.totalDebit }
     val filteredCreditSum = filteredList.sumOf { it.totalCredit }
 
@@ -90,18 +105,25 @@ fun TrialBalanceReportModal(
                 topBar = {
                     TopAppBar(
                         title = {
+                            // Both lines are pinned to one line each: the bar is a fixed
+                            // height, so anything that wraps is drawn over the content
+                            // beneath it rather than growing the bar.
                             Column {
                                 Text(
                                     text = "TRIAL BALANCE REPORT",
                                     fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = RoyalPurplePrimary,
-                                    letterSpacing = 0.5.sp
+                                    letterSpacing = 0.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${user.businessName.ifBlank { "Accounting Ledger" }} • As on $currentDateStr",
+                                    text = "${user.businessName.ifBlank { "Accounting Ledger" }} • As on $headerDateStr",
                                     fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                         },
@@ -134,7 +156,11 @@ fun TrialBalanceReportModal(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
+                                // The gesture bar sits over the bottom of a Dialog window,
+                                // which receives no insets of its own; without this the
+                                // action row is laid out past the screen and sliced.
+                                .padding(16.dp)
+                                .padding(bottom = insets.fullScreenDialogBottom),
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             OutlinedButton(
@@ -166,7 +192,7 @@ fun TrialBalanceReportModal(
                             ) {
                                 Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Copy Summary", fontSize = 12.sp, maxLines = 1, softWrap = false)
+                                Text("Copy", fontSize = 12.sp, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                             }
 
                             Button(
@@ -180,7 +206,7 @@ fun TrialBalanceReportModal(
                             ) {
                                 Icon(Icons.Default.FileDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
-                                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                                Text("Export CSV", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }
@@ -266,9 +292,18 @@ fun TrialBalanceReportModal(
                                         style = MonospaceTabularTextStyle,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = RoyalPurplePrimary
+                                        color = RoyalPurplePrimary,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    Text("Allocations & Assets", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "Allocations",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 
@@ -285,9 +320,18 @@ fun TrialBalanceReportModal(
                                         style = MonospaceTabularTextStyle,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = RoyalPurplePrimary
+                                        color = RoyalPurplePrimary,
+                                        maxLines = 1,
+                                        softWrap = false,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    Text("Sources & Liabilities", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "Sources",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
 
@@ -300,12 +344,21 @@ fun TrialBalanceReportModal(
                                     Text("LEDGERS", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = DarkPurpleVariant)
                                     Spacer(modifier = Modifier.height(2.dp))
                                     Text(
-                                        text = "${trialBalance.size} Accounts",
+                                        text = "${trialBalance.size}",
+                                        style = MonospaceTabularTextStyle,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = DarkPurpleVariant
+                                        color = DarkPurpleVariant,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
-                                    Text("In Master DB", fontSize = 9.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text(
+                                        "Accounts",
+                                        fontSize = 9.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
                                 }
                             }
                         }
@@ -326,22 +379,27 @@ fun TrialBalanceReportModal(
 
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .horizontalScroll(rememberScrollState()),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                listOf("ALL" to "All", "ASSET" to "Assets", "LIABILITY" to "Liabilities", "REVENUE" to "Revenue", "EXPENSE" to "Expenses", "EQUITY" to "Equity").forEach { (key, label) ->
-                                    val isSelected = selectedCategoryFilter == key
-                                    FilterChip(
-                                        selected = isSelected,
+                            // Wraps onto as many lines as it needs instead of scrolling
+                            // sideways. The row was a horizontalScroll, which put "Expenses"
+                            // and "Equity" off the right edge of a 360dp screen with nothing
+                            // to indicate they were there — a filter you cannot see is a
+                            // filter you do not have. ChoiceChipRow is the shared FlowRow the
+                            // rest of the app already uses for exactly this.
+                            ChoiceChipRow(modifier = Modifier.fillMaxWidth()) {
+                                listOf(
+                                    "ALL" to "All",
+                                    "ASSET" to "Assets",
+                                    "LIABILITY" to "Liabilities",
+                                    "REVENUE" to "Revenue",
+                                    "EXPENSE" to "Expenses",
+                                    "EQUITY" to "Equity"
+                                ).forEach { (key, label) ->
+                                    ChoiceChip(
+                                        label = label,
+                                        selected = selectedCategoryFilter == key,
                                         onClick = { selectedCategoryFilter = key },
-                                        label = { Text(label, fontSize = 11.sp) },
-                                        colors = FilterChipDefaults.filterChipColors(
-                                            selectedContainerColor = RoyalPurplePrimary,
-                                            selectedLabelColor = OnAccent
-                                        )
+                                        fontSize = 11.sp,
+                                        testTag = "tb_filter_$key"
                                     )
                                 }
                             }
@@ -361,7 +419,7 @@ fun TrialBalanceReportModal(
                                     .fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("Ledger Account & Group", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, modifier = Modifier.weight(1.5f))
+                                Text("Ledger Account", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1.5f))
                                 Text("Debit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
                                 Text("Credit (₹)", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = OnAccent, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
                             }
